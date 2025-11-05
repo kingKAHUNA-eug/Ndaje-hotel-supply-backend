@@ -6,6 +6,7 @@ dist
 coverage
 .prisma
 .DS_Store
-
+# Firebase credentials
+src/config/firebase-service-account.json
 
 /src/generated/prisma
