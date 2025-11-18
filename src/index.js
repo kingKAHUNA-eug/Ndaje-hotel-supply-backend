@@ -27,11 +27,10 @@ const app = express();
 
 // ────── CORS — FIXED FOR NETLIFY CLIENT + ADMIN ──────
 const allowedOrigins = [
-  'https://ndaje-admin.vercel.app',               // Admin dashboard
-  'https://agent-691c6fc90f8b02212de--ndaje-client-frontend.netlify.app',  // Netlify client (preview)
-  'https://ndaje-client-frontend.netlify.app',    // Netlify client (production)
-  'http://localhost:5173',                        // Local admin
-  'http://localhost:3000',                        // Local client
+  'https://ndaje-admin.vercel.app',               
+  'https://ndaje-hotel-supply.vercel.app/',
+  'http://localhost:5173',                        
+  'http://localhost:3000',                       
 ];
 
 app.use(cors({
