@@ -28,7 +28,7 @@ const app = express();
 // ────── CORS — FIXED FOR NETLIFY CLIENT + ADMIN ──────
 const allowedOrigins = [
   'https://ndaje-admin.vercel.app',               
-  'https://ndaje-hotel-supply.vercel.app/',
+  'https://ndaje-hotel-supply.vercel.app',
   'http://localhost:5173',                        
   'http://localhost:3000',                       
 ];
