@@ -1,14 +1,15 @@
-// src/index.js — FINAL RENDER-READY VERSION (100% LIVE ON RENDER)
+// src/index.js — FINAL PRODUCTION VERSION (WORKS ON RENDER + BOTH FRONTENDS)
 require('dotenv').config();
-console.log('Loaded DATABASE_URL:', process.env.DATABASE_URL);
+console.log('Loaded DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...');
 
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
+const adminGuard = require('./middlewares/adminGuard');
 
-// ────── Export prisma for other files (authController, etc.) ──────
+// ────── Prisma export ──────
 const prisma = new PrismaClient();
 module.exports.prisma = prisma;
 
@@ -24,37 +25,38 @@ const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
 
-// Security middleware
+// ────── CORS — ACCEPTS BOTH ADMIN + CLIENT FRONTENDS ──────
+const allowedOrigins = [
+  'https://ndaje-admin.vercel.app',        // ← Your ADMIN dashboard
+  'https://ndaje-frontend.vercel.app',     // ← Your CLIENT app (or future domain)
+  'http://localhost:5173',                 // ← Local dev (admin)
+  'http://localhost:3000',                 // ← Local dev (client)
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+// Security & logging
 app.use(helmet());
-
-// CORS configuration — allows localhost + future live domains
-const allowedOrigins = (
-  process.env.FRONTEND_URL || 'http://localhost:5173'
-)
-  .split(',')
-  .map(origin => origin.trim());
-
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-  })
-);
-
-// Body parsing middleware
+app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Logging middleware
-app.use(morgan('dev'));
-
-// Root & Health check
+// Health & root
 app.get('/', (req, res) => {
   res.json({ success: true, message: 'NDAJE Backend Running — King KAHUNA Empire' });
 });
@@ -65,54 +67,36 @@ app.get('/health', (req, res) => {
     message: 'NDAJE Backend Running',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV,
-    port: process.env.PORT || 10000,
   });
 });
 
-// API routes
+// ────── ROUTES ──────
 app.use('/api/auth', authRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
-app.use('/api/admin', adminRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 
-// 404 handler
+// ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
+app.use('/api/admin', adminGuard, adminRoutes);
+
+// 404
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-  });
+  res.status(404).json({ success: false, message: 'Route not found' });
 });
 
 // Global error handler
 app.use((error, req, res, next) => {
-  console.error('Global error handler:', error);
-
-  if (error.code === 'P2002') {
-    return res.status(400).json({
-      success: false,
-      message: 'Duplicate entry found',
-    });
-  }
-
-  if (error.code === 'P2025') {
-    return res.status(404).json({
-      success: false,
-      message: 'Record not found',
-    });
-  }
-
+  console.error('Error:', error.message);
   res.status(error.status || 500).json({
     success: false,
     message: error.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
   });
 });
 
-// ────── RENDER PORT FIX: Force port + bind to 0.0.0.0 ──────
+// ────── START SERVER ──────
 const PORT = process.env.PORT || 10000;
 
 async function startServer() {
@@ -122,9 +106,9 @@ async function startServer() {
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`NDAJE Backend Running on port ${PORT}`);
-      console.log(`Environment: ${process.env.NODE_ENV}`);
-      console.log(`Health check: https://ndaje-backend.onrender.com/health`);
-      console.log(`Root check:   https://ndaje-backend.onrender.com/`);
+      console.log(`Admin Dashboard → https://ndaje-admin.vercel.app`);
+      console.log(`Client App      → https://ndaje-frontend.vercel.app`);
+      console.log(`Health check    → https://ndaje-hotel-supply-backend.onrender.com/health`);
       console.log(`Rwanda belongs to NDAJE.`);
     });
   } catch (error) {
