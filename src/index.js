@@ -1,4 +1,4 @@
-// src/index.js — FINAL PRODUCTION VERSION (WORKS ON RENDER + BOTH FRONTENDS)
+// src/index.js — FIXED FOR NETLIFY + CORS BLOCKS
 require('dotenv').config();
 console.log('Loaded DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...');
 
@@ -25,18 +25,18 @@ const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
 
-// ────── CORS — ACCEPTS BOTH ADMIN + CLIENT FRONTENDS ──────
+// ────── CORS — FIXED FOR NETLIFY CLIENT + ADMIN ──────
 const allowedOrigins = [
-  'https://ndaje-admin.vercel.app',        // ← Your ADMIN dashboard
-  'https://ndaje-frontend.vercel.app',     // ← Your CLIENT app (or future domain)
-  'http://localhost:5173',                 // ← Local dev (admin)
-  'http://localhost:3000',                 // ← Local dev (client)
+  'https://ndaje-admin.vercel.app',               // Admin dashboard
+  'https://agent-691c6fc90f8b02212de--ndaje-client-frontend.netlify.app',  // Netlify client (preview)
+  'https://ndaje-client-frontend.netlify.app',    // Netlify client (production)
+  'http://localhost:5173',                        // Local admin
+  'http://localhost:3000',                        // Local client
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, Postman)
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true);  // Allow curl/Postman
     
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -106,9 +106,8 @@ async function startServer() {
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`NDAJE Backend Running on port ${PORT}`);
-      console.log(`Admin Dashboard → https://ndaje-admin.vercel.app`);
-      console.log(`Client App      → https://ndaje-frontend.vercel.app`);
-      console.log(`Health check    → https://ndaje-hotel-supply-backend.onrender.com/health`);
+      console.log(`Netlify Client → https://agent-691c6fc90f8b02212de--ndaje-client-frontend.netlify.app`);
+      console.log(`Health check → https://ndaje-hotel-supply-backend.onrender.com/health`);
       console.log(`Rwanda belongs to NDAJE.`);
     });
   } catch (error) {
