@@ -11,7 +11,7 @@ const authenticateToken = async (req, res, next) => {
 
     // CRITICAL FIX: Use firebaseUid, not id
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: decoded.userId },  // ← THIS IS THE FIX
+      where: { firebaseUid: decoded.userId }, // ← THIS IS THE FIX
       select: { id: true, firebaseUid: true, email: true, role: true, name: true }
     });
 
@@ -25,8 +25,8 @@ const authenticateToken = async (req, res, next) => {
     };
 
     next();
-  } catch (error) {
-    console.error('Auth middleware error:', error);
+  } catch (err) {
+    console.error('Auth middleware error:', err);
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
