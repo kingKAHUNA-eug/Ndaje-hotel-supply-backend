@@ -7,8 +7,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-const adminGuard = require('./middlewares/adminGuard');
-
+//const adminGuard = require('./middlewares/adminGuard');
+const { authenticateToken, requireAdmin } = require('./middlewares/auth');
 // ────── Prisma export ──────
 const prisma = new PrismaClient();
 module.exports.prisma = prisma;
@@ -79,7 +79,7 @@ app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
-app.use('/api/admin', adminGuard, adminRoutes);
+app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
 app.use('/api/manager', require('./routes/manager'));
 // 404
 app.use((req, res) => {
