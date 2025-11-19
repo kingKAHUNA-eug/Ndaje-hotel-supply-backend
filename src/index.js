@@ -25,29 +25,20 @@ const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
 
-// ────── CORS — FIXED FOR NETLIFY CLIENT + ADMIN ──────
-const allowedOrigins = [
-  'https://ndaje-admin.vercel.app',               
-  'https://ndaje-hotel-supply.vercel.app',
-  'http://localhost:5173',                        
-  'http://localhost:3000',                       
-];
-
+// FIXED CORS — RENDER.COM PROOF
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);  // Allow curl/Postman
-    
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log('CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: [
+    'https://ndaje-admin.vercel.app',
+    'https://ndaje-hotel-supply.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+app.options('*', cors()); // THIS FIXES PREFLIGHT ON RENDER
 
 // Security & logging
 app.use(helmet());
