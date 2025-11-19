@@ -1,4 +1,4 @@
-// src/index.js — FIXED FOR NETLIFY + CORS BLOCKS
+// src/index.js — FIXED FOR RENDER + CORS
 require('dotenv').config();
 console.log('Loaded DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...');
 
@@ -7,8 +7,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
-//const adminGuard = require('./middlewares/adminGuard');
 const { authenticateToken, requireAdmin } = require('./middlewares/auth');
+
 // ────── Prisma export ──────
 const prisma = new PrismaClient();
 module.exports.prisma = prisma;
@@ -26,7 +26,7 @@ const deliveryRoutes = require('./routes/delivery');
 const app = express();
 
 // FIXED CORS — RENDER.COM PROOF
-app.use(cors({
+const corsOptions = {
   origin: [
     'https://ndaje-admin.vercel.app',
     'https://ndaje-hotel-supply.vercel.app',
@@ -34,11 +34,23 @@ app.use(cors({
     'http://localhost:3000'
   ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
 
-app.options('*', cors()); // THIS FIXES PREFLIGHT ON RENDER
+app.use(cors(corsOptions));
+
+// ✅ FIXED: Handle preflight OPTIONS requests properly
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    return res.status(200).json({});
+  }
+  next();
+});
 
 // Security & logging
 app.use(helmet());
@@ -72,6 +84,7 @@ app.use('/api/deliveries', deliveryRoutes);
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
 app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
 app.use('/api/manager', require('./routes/manager'));
+
 // 404
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
@@ -96,7 +109,6 @@ async function startServer() {
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`NDAJE Backend Running on port ${PORT}`);
-      console.log(`Netlify Client → https://agent-691c6fc90f8b02212de--ndaje-client-frontend.netlify.app`);
       console.log(`Health check → https://ndaje-hotel-supply-backend.onrender.com/health`);
       console.log(`Rwanda belongs to NDAJE.`);
     });
