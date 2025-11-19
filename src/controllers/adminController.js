@@ -122,30 +122,37 @@ const getAllOrders = async (req, res) => {
 };
 
 // CREATE manager
-const createManager = async (req, res) => {
-  const { name, email, phone, password } = req.body;
-
-  if (!name || !email || !phone) {
-    return res.status(400).json({ success: false, message: 'Name, email and phone required' });
+const createManager = async () => {
+  if (!newManager.name || !newManager.email || !newManager.phone) {
+    alert('Name, email and phone are required')
+    return
   }
 
   try {
-    const user = await User.create({
-      name,
-      email: email.toLowerCase(),
-      phone,
-      password: password || Math.random().toString(36).slice(-8) + 'A1!',
-      role: 'MANAGER',
-      status: 'active'
-    });
+    const payload = {
+      name: newManager.name.trim(),
+      email: newManager.email.trim().toLowerCase(),
+      phone: newManager.phone.trim(),
+      // FORCE a strong password — bypass any validation
+      password: newManager.password || "NDAJE@2025!manager"
+    }
 
-    const safeUser = { ...user._doc, password: undefined };
-    res.json({ success: true, data: { user: safeUser } });
+    console.log('Sending:', payload)
+
+    const res = await axios.post(`${API_URL}/admin/create-manager`, payload, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+
+    setManagers(prev => [...prev, res.data.data.user])
+    setShowAddManager(false)
+    setNewManager({ name: '', email: '', phone: '', password: '' })
+    
+    alert(`Manager "${res.data.data.user.name}" created!\nLogin: ${payload.email}\nPassword: ${payload.password}`)
   } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
+    console.error('ERROR:', err.response?.data)
+    alert(err.response?.data?.message || 'Server error - check console')
   }
-};
-
+}
 // CREATE driver
 const createDriver = async (req, res) => {
   const { name, email, phone, vehicle, password } = req.body;
