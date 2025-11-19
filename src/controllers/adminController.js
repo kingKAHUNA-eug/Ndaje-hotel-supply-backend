@@ -1,8 +1,7 @@
 // controllers/adminController.js
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
-const User = require('../models/User');
-const Quote = require('../models/Quote');  // This is your Order model (approved quotes = orders)
+const { prisma } = require('../config/prisma'); // ← Use Prisma, not Mongoose models
 
 // Validation schemas
 const reportFiltersSchema = z.object({
@@ -11,7 +10,7 @@ const reportFiltersSchema = z.object({
   status: z.string().optional()
 });
 
-// ======================== YOUR ORIGINAL CODE (KEPT 100% INTACT) ========================
+// ======================== YOUR ORIGINAL CODE ========================
 const generateSystemReport = async (req, res) => {
   try {
     const filters = reportFiltersSchema.parse(req.query);
@@ -85,14 +84,27 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
-// ======================== NEW REAL ENDPOINTS (ADDED NOW) ========================
+// ======================== REAL ENDPOINTS WITH PRISMA ========================
 
 // GET all managers
 const getAllManagers = async (req, res) => {
   try {
-    const managers = await User.find({ role: 'MANAGER' }).select('-password');
+    const managers = await prisma.user.findMany({
+      where: { role: 'MANAGER' },
+      select: {
+        id: true,
+        firebaseUid: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        createdAt: true
+      }
+    });
     res.json({ success: true, data: managers });
   } catch (err) {
+    console.error('Get all managers error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -100,9 +112,22 @@ const getAllManagers = async (req, res) => {
 // GET all drivers
 const getAllDrivers = async (req, res) => {
   try {
-    const drivers = await User.find({ role: 'DRIVER' }).select('-password');
+    const drivers = await prisma.user.findMany({
+      where: { role: 'DELIVERY_AGENT' }, // ← Use DELIVERY_AGENT, not DRIVER
+      select: {
+        id: true,
+        firebaseUid: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        status: true,
+        createdAt: true
+      }
+    });
     res.json({ success: true, data: drivers });
   } catch (err) {
+    console.error('Get all drivers error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -110,36 +135,68 @@ const getAllDrivers = async (req, res) => {
 // GET all real orders (approved quotes)
 const getAllOrders = async (req, res) => {
   try {
-    const orders = await Quote.find({ status: 'approved' })
-      .populate('clientId', 'name email phone hotelName')
-      .populate('items.productId', 'name unit referencePrice')
-      .sort({ approvedAt: -1 });
+    const orders = await prisma.quote.findMany({
+      where: { status: 'approved' },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            hotelName: true
+          }
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                unit: true,
+                referencePrice: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { updatedAt: 'desc' }
+    });
 
     res.json({ success: true, data: orders });
   } catch (err) {
+    console.error('Get all orders error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // CREATE manager
-// CREATE manager — FIXED FOR PRISMA + FIREBASE
 const createManager = async (req, res) => {
   const { name, email, phone, password } = req.body;
 
   if (!name || !email || !phone) {
-    return res.status(400).json({ success: false, message: 'Name, email and phone required' });
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Name, email and phone are required' 
+    });
   }
 
   try {
+    const bcrypt = require('bcrypt');
+    const hashedPassword = await bcrypt.hash(
+      password || 'NDAJE@2025!manager', 
+      10
+    );
+
     const user = await prisma.user.create({
       data: {
-        name,
-        email: email.toLowerCase(),
-        phone,
-        password: password || Math.random().toString(36).slice(-8) + 'A1!',
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        password: hashedPassword,
         role: 'MANAGER',
         status: 'active',
-        // firebaseUid will be null for local accounts
+        emailVerified: true
       }
     });
 
@@ -147,31 +204,45 @@ const createManager = async (req, res) => {
     res.json({ success: true, data: { user: safeUser } });
   } catch (err) {
     console.error('Create manager error:', err);
-    res.status(400).json({ success: false, message: err.message || 'Failed to create manager' });
+    res.status(400).json({ success: false, message: err.message });
   }
 };
+
 // CREATE driver
 const createDriver = async (req, res) => {
   const { name, email, phone, vehicle, password } = req.body;
 
-  if (!name || !email || !phone || !vehicle) {
-    return res.status(400).json({ success: false, message: 'Name, email, phone and vehicle required' });
+  if (!name || !email || !phone) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Name, email and phone are required' 
+    });
   }
 
   try {
-    const user = await User.create({
-      name,
-      email: email.toLowerCase(),
-      phone,
-      vehicle,
-      password: password || Math.random().toString(36).slice(-8) + 'A1!',
-      role: 'DRIVER',
-      status: 'active'
+    const bcrypt = require('bcrypt');
+    const hashedPassword = await bcrypt.hash(
+      password || Math.random().toString(36).slice(-8) + 'A1!', 
+      10
+    );
+
+    const user = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
+        password: hashedPassword,
+        role: 'DELIVERY_AGENT',
+        status: 'active',
+        emailVerified: true
+        // Note: If you have a 'vehicle' field in your schema, add it here
+      }
     });
 
-    const safeUser = { ...user._doc, password: undefined };
+    const { password: _, ...safeUser } = user;
     res.json({ success: true, data: { user: safeUser } });
   } catch (err) {
+    console.error('Create driver error:', err);
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -181,7 +252,6 @@ module.exports = {
   generateSystemReport,
   exportReportToCSV,
   getDashboardSummary,
-  // NEW ONES
   getAllManagers,
   getAllDrivers,
   getAllOrders,
