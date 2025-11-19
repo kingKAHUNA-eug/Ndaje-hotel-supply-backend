@@ -80,7 +80,7 @@ app.use('/api/deliveries', deliveryRoutes);
 
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
 app.use('/api/admin', adminGuard, adminRoutes);
-
+app.use('/api/manager', require('./routes/manager'));
 // 404
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
