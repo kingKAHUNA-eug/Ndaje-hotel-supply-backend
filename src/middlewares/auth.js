@@ -1,51 +1,35 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 
-// JWT Authentication middleware
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ success: false, message: 'No token' });
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Access token required'
-      });
-    }
-
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Check if user still exists
+
+    // CRITICAL FIX: Use firebaseUid, not id
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
-      select: { id: true, email: true, role: true }
+      where: { firebaseUid: decoded.userId },  // ← THIS IS THE FIX
+      select: { id: true, firebaseUid: true, email: true, role: true, name: true }
     });
 
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid token - user not found'
-      });
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
 
-    // Add user info to request
     req.user = {
-      userId: user.id,
+      userId: user.firebaseUid,
       email: user.email,
-      role: user.role
+      role: user.role,
+      name: user.name
     };
 
     next();
-
   } catch (error) {
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid token'
-      });
-    }
+    console.error('Auth middleware error:', error);
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
+  }
+};
 
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
@@ -59,9 +43,7 @@ const authenticateToken = async (req, res, next) => {
       success: false,
       message: 'Internal server error'
     });
-  }
-};
-
+  
 // Role-based authorization middleware
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
