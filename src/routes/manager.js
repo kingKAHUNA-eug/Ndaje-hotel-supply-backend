@@ -1,18 +1,23 @@
-// routes/manager.js  (new file)
+// routes/manager.js
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, requireRole } = require('../middlewares/auth');
+
+// IMPORT EVERYTHING YOU NEED
+const { authenticateToken, requireManager } = require('../middlewares/auth');
+
 const {
   getPendingQuotes,
   priceAndApproveQuote,
   getMyPricedOrders
 } = require('../controllers/managerController');
 
+// Protect all manager routes
 router.use(authenticateToken);
-router.use(requireManager);
+router.use(requireManager);  // NOW IT WORKS — requireManager IS IMPORTED!
 
-router.get('/quotes/pending', getPendingQuotes);           // Manager sees all pending quotes
-router.post('/quotes/:id/price', priceAndApproveQuote);    // Manager sets prices → turns into Order
-router.get('/orders', getMyPricedOrders);                  // Manager sees orders he created
+// Manager routes
+router.get('/quotes/pending', getPendingQuotes);
+router.post('/quotes/:id/price', priceAndApproveQuote);
+router.get('/orders', getMyPricedOrders);
 
 module.exports = router;
