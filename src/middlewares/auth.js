@@ -5,17 +5,28 @@ const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ success: false, message: 'No token' });
+    
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Access token required' 
+      });
+    }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // CRITICAL FIX: Use firebaseUid, not id
     const user = await prisma.user.findUnique({
-      where: { firebaseUid: decoded.userId }, // ← THIS IS THE FIX
+      where: { firebaseUid: decoded.userId },
       select: { id: true, firebaseUid: true, email: true, role: true, name: true }
     });
 
-    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token - user not found' 
+      });
+    }
 
     req.user = {
       userId: user.firebaseUid,
@@ -25,11 +36,15 @@ const authenticateToken = async (req, res, next) => {
     };
 
     next();
-  } catch (err) {
-    console.error('Auth middleware error:', err);
-    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
-  }
-};
+
+  } catch (error) {  // ← Changed 'err' to 'error' for consistency
+    // Handle specific JWT errors
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid token'
+      });
+    }
 
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
@@ -43,7 +58,9 @@ const authenticateToken = async (req, res, next) => {
       success: false,
       message: 'Internal server error'
     });
-  
+  }
+};  // ← Function ends here
+
 // Role-based authorization middleware
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
