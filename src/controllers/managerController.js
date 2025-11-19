@@ -1,15 +1,39 @@
 // controllers/managerController.js
-const Quote = require('../models/Quote');
+const { prisma } = require('../config/prisma');
 
 const getPendingQuotes = async (req, res) => {
   try {
-    const quotes = await Quote.find({ status: 'pending' })
-      .populate('clientId', 'name email phone hotelName')
-      .populate('items.productId', 'name unit referencePrice')
-      .sort({ createdAt: -1 });
+    const quotes = await prisma.quote.findMany({
+      where: { status: 'pending' },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            hotelName: true
+          }
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                unit: true,
+                referencePrice: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
     res.json({ success: true, data: quotes });
   } catch (err) {
+    console.error('Get pending quotes error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -23,44 +47,115 @@ const priceAndApproveQuote = async (req, res) => {
   }
 
   try {
-    const quote = await Quote.findById(id);
-    if (!quote) return res.status(404).json({ success: false, message: 'Quote not found' });
+    // Fetch the quote with items
+    const quote = await prisma.quote.findUnique({
+      where: { id },
+      include: { items: true }
+    });
+
+    if (!quote) {
+      return res.status(404).json({ success: false, message: 'Quote not found' });
+    }
+
     if (quote.status !== 'pending') {
       return res.status(400).json({ success: false, message: 'Quote already processed' });
     }
 
     let totalAmount = 0;
-    quote.items = quote.items.map(item => {
-      const priced = prices.find(p => p.productId === item.productId.toString());
-      if (!priced) throw new Error(`Price missing for ${item.productId}`);
+
+    // Update each quote item with final price
+    for (const item of quote.items) {
+      const priced = prices.find(p => p.productId === item.productId);
+      if (!priced) {
+        throw new Error(`Price missing for product ${item.productId}`);
+      }
+
       const finalPrice = Number(priced.finalPrice);
       totalAmount += finalPrice * item.quantity;
-      return { ...item, finalPrice };
+
+      await prisma.quoteItem.update({
+        where: { id: item.id },
+        data: { finalPrice }
+      });
+    }
+
+    // Update the quote with approval info
+    const updatedQuote = await prisma.quote.update({
+      where: { id },
+      data: {
+        finalPrice: totalAmount,
+        status: 'approved',
+        approvedBy: req.user.userId, // Using firebaseUid from auth middleware
+        approvedAt: new Date()
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            hotelName: true
+          }
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                unit: true,
+                referencePrice: true
+              }
+            }
+          }
+        }
+      }
     });
 
-    quote.finalPrice = totalAmount;
-    quote.status = 'approved';
-    quote.approvedBy = req.user.id;
-    quote.approvedAt = new Date();
-    await quote.save();
-
-    res.json({ success: true, data: quote });
+    res.json({ success: true, data: updatedQuote });
   } catch (err) {
+    console.error('Price and approve quote error:', err);
     res.status(400).json({ success: false, message: err.message });
   }
 };
 
 const getMyPricedOrders = async (req, res) => {
   try {
-    const orders = await Quote.find({ 
-      status: 'approved', 
-      approvedBy: req.user.id 
-    })
-      .populate('clientId', 'name email phone hotelName')
-      .sort({ approvedAt: -1 });
+    const orders = await prisma.quote.findMany({
+      where: {
+        status: 'approved',
+        approvedBy: req.user.userId // Using firebaseUid from auth middleware
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            hotelName: true
+          }
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                unit: true,
+                referencePrice: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { approvedAt: 'desc' }
+    });
 
     res.json({ success: true, data: orders });
   } catch (err) {
+    console.error('Get my priced orders error:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
