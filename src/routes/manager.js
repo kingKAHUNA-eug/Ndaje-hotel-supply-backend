@@ -9,7 +9,7 @@ const {
 } = require('../controllers/managerController');
 
 router.use(authenticateToken);
-router.use(requireRole('MANAGER'));
+router.use(requireManager);
 
 router.get('/quotes/pending', getPendingQuotes);           // Manager sees all pending quotes
 router.post('/quotes/:id/price', priceAndApproveQuote);    // Manager sets prices → turns into Order
