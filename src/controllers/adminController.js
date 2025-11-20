@@ -166,7 +166,7 @@ const createManager = async (req, res) => {
       });
     }
 
-    const manager = await prisma.user.create({
+    const manager = await prisma.User.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
@@ -201,7 +201,7 @@ const createDriver = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, email and phone required' });
     }
 
-    const driver = await prisma.user.create({
+    const driver = await prisma.User.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
