@@ -144,36 +144,54 @@ const signup = async (req, res) => {
 /* ========== LOGIN ========== */
 const login = async (req, res) => {
   try {
-    const { email, password } = loginSchema.parse(req.body);
+    // SAFE PARSE — never throws
+    const parseResult = loginSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: parseResult.error.errors[0].message
+      });
+    }
 
-    // 1. Find user in MongoDB
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    const { email, password } = parseResult.data;
 
-    // 2. Generate Firebase custom token
-    const firebaseToken = await admin.auth().createCustomToken(user.firebaseUid);
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
 
-    // 3. Generate your own JWT
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Must have firebaseUid (all users do)
+    if (!user.firebaseUid) {
+      return res.status(400).json({ success: false, message: 'Account not linked. Try Google login.' });
+    }
+
+    // Generate your JWT — this matches what authenticateToken expects
     const token = jwt.sign(
-      { userId: user.firebaseUid, email, role: user.role },
+      { userId: user.firebaseUid, email: user.email, role: user.role },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    res.json({
+    return res.json({
       success: true,
-      data: {
-        firebaseToken,
-        token,
-        user: { id: user.firebaseUid, name: user.name, email, role: user.role },
-      },
+      token,
+      user: {
+        id: user.firebaseUid,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      }
     });
+
   } catch (err) {
-    console.error('Login error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('LOGIN ERROR:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 /* ========== PASSWORD RESET ========== */
 const requestPasswordReset = async (req, res) => {
   try {
