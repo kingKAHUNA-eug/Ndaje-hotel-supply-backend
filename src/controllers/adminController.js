@@ -170,44 +170,57 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// CREATE manager
+// REPLACE ONLY THIS FUNCTION IN adminController.js
 const createManager = async (req, res) => {
-  const { name, email, phone, password } = req.body;
-
-  if (!name || !email || !phone) {
-    return res.status(400).json({ 
-      success: false, 
-      message: 'Name, email and phone are required' 
-    });
-  }
-
   try {
-    const bcrypt = require('bcrypt');
-    const hashedPassword = await bcrypt.hash(
-      password || 'NDAJE@2025!manager', 
-      10
-    );
+    const { name, email, phone } = req.body;
 
-    const user = await prisma.user.create({
+    // REQUIRED FIELDS ONLY
+    if (!name || !email || !phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Name, email and phone are required'
+      });
+    }
+
+    // Create manager — NO PASSWORD NEEDED (they'll use Google login or reset later)
+    const manager = await prisma.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
-        password: hashedPassword,
         role: 'MANAGER',
-        status: 'active',
-        emailVerified: true
+        firebaseUid: null,
+        emailVerified: true,
+        status: 'active'
       }
     });
 
-    const { password: _, ...safeUser } = user;
-    res.json({ success: true, data: { user: safeUser } });
+    // Return safe user (no password field)
+    const { password: _, ...safeManager } = manager;
+
+    return res.json({
+      success: true,
+      message: 'Manager created successfully!',
+      data: { user: safeManager }
+    });
+
   } catch (err) {
     console.error('Create manager error:', err);
-    res.status(400).json({ success: false, message: err.message });
+
+    if (err.code === 'P2002') {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to create manager'
+    });
   }
 };
-
 // CREATE driver
 const createDriver = async (req, res) => {
   const { name, email, phone, vehicle, password } = req.body;
