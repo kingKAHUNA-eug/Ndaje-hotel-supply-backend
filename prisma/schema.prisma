@@ -64,7 +64,7 @@ model User {
   phone         String?
   isActive      Boolean   @default(true)
   isVerified    Boolean   @default(false)
-  firebaseUid   String?
+  firebaseUid   String?  @unique 
   avatar        String?
 
   emailVerified Boolean   @default(false)
