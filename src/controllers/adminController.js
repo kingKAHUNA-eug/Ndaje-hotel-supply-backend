@@ -1,7 +1,7 @@
 // controllers/adminController.js
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma'); // FIXED: removed { }
 const bcrypt = require('bcrypt');
 
 // Validation schemas
@@ -82,7 +82,7 @@ const getDashboardSummary = async (req, res) => {
   }
 };
 
-// ======================== ADMIN ENDPOINTS (100% WORKING) ========================
+// ======================== ADMIN ENDPOINTS ========================
 
 // GET all managers
 const getAllManagers = async (req, res) => {
@@ -154,7 +154,7 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// CREATE MANAGER — FINAL WORKING VERSION
+// CREATE MANAGER
 const createManager = async (req, res) => {
   try {
     const { name, email, phone } = req.body;
@@ -166,7 +166,7 @@ const createManager = async (req, res) => {
       });
     }
 
-    const manager = await prisma.User.create({
+    const manager = await prisma.user.create({ // FIXED: lowercase 'user'
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
@@ -193,7 +193,7 @@ const createManager = async (req, res) => {
   }
 };
 
-// CREATE DRIVER (optional — you can delete if not needed)
+// CREATE DRIVER
 const createDriver = async (req, res) => {
   try {
     const { name, email, phone } = req.body;
@@ -201,7 +201,7 @@ const createDriver = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, email and phone required' });
     }
 
-    const driver = await prisma.User.create({
+    const driver = await prisma.user.create({ // FIXED: lowercase 'user'
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
