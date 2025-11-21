@@ -229,7 +229,6 @@ const createDriver = async (req, res) => {
         phone: phone.trim(),
         password: hashedPassword,
         role: 'DELIVERY_AGENT',
-        firebaseUid: null,
         isActive: true,
         emailVerified: true
       }
