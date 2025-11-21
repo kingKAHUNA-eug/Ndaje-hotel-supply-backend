@@ -130,7 +130,7 @@ const getAllDrivers = async (req, res) => {
   }
 };
 
-// GET all approved quotes (real orders)
+// GET all orders — FIXED: removed 'unit' field
 const getAllOrders = async (req, res) => {
   try {
     const orders = await prisma.quote.findMany({
@@ -141,8 +141,13 @@ const getAllOrders = async (req, res) => {
         },
         items: {
           include: {
-            product: { select: { id: true, name: true, unit: true } }
+            product: { 
+              select: { id: true, name: true }   // ← REMOVED 'unit'
+            }
           }
+        },
+        pricedBy: {
+          select: { name: true }
         }
       },
       orderBy: { updatedAt: 'desc' }
@@ -154,10 +159,10 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// CREATE MANAGER — FINAL WORKING VERSION WITH DEFAULT PASSWORD
+// CREATE MANAGER — FIXED: NO password field
 const createManager = async (req, res) => {
   try {
-    const { name, email, phone, password } = req.body;
+    const { name, email, phone } = req.body;
 
     if (!name || !email || !phone) {
       return res.status(400).json({
@@ -166,41 +171,30 @@ const createManager = async (req, res) => {
       });
     }
 
-    // Check if email already exists
     const exists = await prisma.user.findUnique({
       where: { email: email.trim().toLowerCase() }
     });
+
     if (exists) {
       return res.status(400).json({ success: false, message: 'Email already in use' });
     }
-
-    // Use provided password or generate a strong default
-    const passwordToUse = password || 'NDAJE@2025!manager';
-    const hashedPassword = await bcrypt.hash(passwordToUse, 10);
 
     const manager = await prisma.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
-        password: hashedPassword,           // ← THIS WAS MISSING
         role: 'MANAGER',
-        firebaseUid: null,
         isActive: true,
         emailVerified: true
+        // NO password field — your schema doesn't have it
       }
     });
-
-    // Don't send password back
-    const { password: _, ...safeManager } = manager;
 
     res.json({
       success: true,
       message: 'Manager created successfully!',
-      data: { 
-        user: safeManager,
-        tempPassword: password ? undefined : passwordToUse   // Only show if auto-generated
-      }
+      data: { user: manager }
     });
 
   } catch (err) {
