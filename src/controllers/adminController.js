@@ -154,10 +154,10 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// CREATE MANAGER
+// CREATE MANAGER — FINAL WORKING VERSION WITH DEFAULT PASSWORD
 const createManager = async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    const { name, email, phone, password } = req.body;
 
     if (!name || !email || !phone) {
       return res.status(400).json({
@@ -166,11 +166,24 @@ const createManager = async (req, res) => {
       });
     }
 
-    const manager = await prisma.user.create({ // FIXED: lowercase 'user'
+    // Check if email already exists
+    const exists = await prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() }
+    });
+    if (exists) {
+      return res.status(400).json({ success: false, message: 'Email already in use' });
+    }
+
+    // Use provided password or generate a strong default
+    const passwordToUse = password || 'NDAJE@2025!manager';
+    const hashedPassword = await bcrypt.hash(passwordToUse, 10);
+
+    const manager = await prisma.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
+        password: hashedPassword,           // ← THIS WAS MISSING
         role: 'MANAGER',
         firebaseUid: null,
         isActive: true,
@@ -178,10 +191,16 @@ const createManager = async (req, res) => {
       }
     });
 
+    // Don't send password back
+    const { password: _, ...safeManager } = manager;
+
     res.json({
       success: true,
       message: 'Manager created successfully!',
-      data: { user: manager }
+      data: { 
+        user: safeManager,
+        tempPassword: password ? undefined : passwordToUse   // Only show if auto-generated
+      }
     });
 
   } catch (err) {
@@ -193,7 +212,6 @@ const createManager = async (req, res) => {
   }
 };
 
-// CREATE DRIVER
 const createDriver = async (req, res) => {
   try {
     const { name, email, phone } = req.body;
@@ -201,11 +219,21 @@ const createDriver = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name, email and phone required' });
     }
 
-    const driver = await prisma.user.create({ // FIXED: lowercase 'user'
+    const exists = await prisma.user.findUnique({
+      where: { email: email.trim().toLowerCase() }
+    });
+    if (exists) {
+      return res.status(400).json({ success: false, message: 'Email already in use' });
+    }
+
+    const hashedPassword = await bcrypt.hash('NDAJE@2025!driver', 10);
+
+    const driver = await prisma.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
+        password: hashedPassword,
         role: 'DELIVERY_AGENT',
         firebaseUid: null,
         isActive: true,
@@ -213,7 +241,16 @@ const createDriver = async (req, res) => {
       }
     });
 
-    res.json({ success: true, message: 'Driver created!', data: { user: driver } });
+    const { password: _, ...safeDriver } = driver;
+
+    res.json({ 
+      success: true, 
+      message: 'Driver created!', 
+      data: { 
+        user: safeDriver,
+        tempPassword: 'NDAJE@2025!driver'
+      } 
+    });
   } catch (err) {
     console.error('Create driver error:', err);
     if (err.code === 'P2002') return res.status(400).json({ success: false, message: 'Email already exists' });
