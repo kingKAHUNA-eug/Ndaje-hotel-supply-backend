@@ -1,4 +1,4 @@
-// middlewares/auth.js  ← FINAL VERSION — WORKS FOREVER
+// middlewares/auth.js  ← FINAL FINAL VERSION — SERVER STARTS, NDAJE LIVES
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 
@@ -18,21 +18,17 @@ const authenticateToken = async (req, res, next) => {
 
     let user;
 
-    // SUPPORT BOTH LOGIN TYPES — Firebase AND Local (email/password)
     if (decoded.firebaseUid) {
-      // Firebase user
       user = await prisma.user.findUnique({
         where: { firebaseUid: decoded.firebaseUid },
         select: { id: true, firebaseUid: true, email: true, role: true, name: true, isActive: true }
       });
     } else if (decoded.email) {
-      // Local login user (admin creating managers/drivers)
       user = await prisma.user.findUnique({
         where: { email: decoded.email },
         select: { id: true, firebaseUid: true, email: true, role: true, name: true, isActive: true }
       });
     } else if (decoded.userId) {
-      // Legacy fallback — try old firebaseUid as userId
       user = await prisma.user.findFirst({
         where: { firebaseUid: decoded.userId },
         select: { id: true, firebaseUid: true, email: true, role: true, name: true, isActive: true }
@@ -48,7 +44,6 @@ const authenticateToken = async (req, res, next) => {
       });
     }
 
-    // Attach clean user to request
     req.user = {
       id: user.id,
       firebaseUid: user.firebaseUid || null,
@@ -66,18 +61,15 @@ const authenticateToken = async (req, res, next) => {
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ success: false, message: 'Token expired' });
     }
-
     console.error('Auth middleware error:', error);
     return res.status(500).json({ success: false, message: 'Authentication failed' });
   }
 };
 
-// Role authorization (unchanged)
+// Role authorization
 const authorize = (...allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ success: false, message: 'Authentication required' });
-    }
+    if (!req.user) return res.status(401).json({ success: false, message: 'Authentication required' });
     if (!allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ success: false, message: 'Forbidden: insufficient permissions' });
     }
@@ -85,15 +77,22 @@ const authorize = (...allowedRoles) => {
   };
 };
 
+// EXPORT ALL THE ROLES YOU USE IN YOUR ROUTES
 const requireAdmin = authorize('ADMIN');
 const requireManager = authorize('MANAGER');
 const requireDeliveryAgent = authorize('DELIVERY_AGENT');
 const requireManagerOrAdmin = authorize('MANAGER', 'ADMIN');
+const requireClient = authorize('CLIENT');                    // ← THIS WAS MISSING
+const requireStaff = authorize('MANAGER', 'ADMIN', 'DELIVERY_AGENT'); // optional
 
+// EXPORT EVERYTHING
 module.exports = {
   authenticateToken,
   requireAdmin,
   requireManager,
   requireDeliveryAgent,
-  requireManagerOrAdmin
+  requireManagerOrAdmin,
+  requireClient,         // ← THIS FIXES THE SERVER CRASH
+  requireStaff,
+  authorize
 };
