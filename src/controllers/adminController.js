@@ -130,24 +130,24 @@ const getAllDrivers = async (req, res) => {
   }
 };
 
-// GET all orders — FIXED: removed 'unit' field
+// GET all orders — FINAL FIXED VERSION
 const getAllOrders = async (req, res) => {
   try {
     const orders = await prisma.quote.findMany({
       where: { status: 'APPROVED' },
       include: {
         client: {
-          select: { id: true, name: true, email: true, phone: true }
+          select: { name: true, email: true, phone: true }
+        },
+        manager: {                    // ← CHANGED FROM pricedBy → manager
+          select: { name: true }
         },
         items: {
           include: {
-            product: { 
-              select: { id: true, name: true }   // ← REMOVED 'unit'
+            product: {
+              select: { name: true }    // unit doesn't exist, removed
             }
           }
-        },
-        pricedBy: {
-          select: { name: true }
         }
       },
       orderBy: { updatedAt: 'desc' }
@@ -206,6 +206,7 @@ const createManager = async (req, res) => {
   }
 };
 
+// CREATE DRIVER — FINAL FIXED (no password field)
 const createDriver = async (req, res) => {
   try {
     const { name, email, phone } = req.body;
@@ -220,33 +221,25 @@ const createDriver = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email already in use' });
     }
 
-    const hashedPassword = await bcrypt.hash('NDAJE@2025!driver', 10);
-
     const driver = await prisma.user.create({
       data: {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         phone: phone.trim(),
-        password: hashedPassword,
         role: 'DELIVERY_AGENT',
         isActive: true,
         emailVerified: true
+        // ← NO password field (your User model has no password)
       }
     });
 
-    const { password: _, ...safeDriver } = driver;
-
-    res.json({ 
-      success: true, 
-      message: 'Driver created!', 
-      data: { 
-        user: safeDriver,
-        tempPassword: 'NDAJE@2025!driver'
-      } 
+    res.json({
+      success: true,
+      message: 'Driver created successfully!',
+      data: { user: driver }
     });
   } catch (err) {
     console.error('Create driver error:', err);
-    if (err.code === 'P2002') return res.status(400).json({ success: false, message: 'Email already exists' });
     res.status(500).json({ success: false, message: 'Failed to create driver' });
   }
 };
