@@ -1,8 +1,16 @@
-// controllers/adminController.js
+// controllers/adminController.js - PRODUCTION VERSION
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
-const prisma = require('../config/prisma'); // FIXED: removed { }
-const bcrypt = require('bcrypt');
+const prisma = require('../config/prisma');
+const crypto = require('crypto'); // Built-in Node.js module (no npm install needed)
+
+// Helper function to generate unique identifiers
+const generateUniqueId = (prefix) => {
+  // Using crypto for better randomness than uuid
+  const randomString = crypto.randomBytes(16).toString('hex');
+  const timestamp = Date.now().toString(36);
+  return `${prefix}_${timestamp}_${randomString}`;
+};
 
 // Validation schemas
 const reportFiltersSchema = z.object({
@@ -11,7 +19,13 @@ const reportFiltersSchema = z.object({
   status: z.string().optional()
 });
 
-// ======================== REPORTS (unchanged) ========================
+const createUserSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  email: z.string().email('Invalid email format'),
+  phone: z.string().min(10, 'Phone must be at least 10 characters')
+});
+
+// ======================== REPORTS ========================
 const generateSystemReport = async (req, res) => {
   try {
     const filters = reportFiltersSchema.parse(req.query);
@@ -27,10 +41,17 @@ const generateSystemReport = async (req, res) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ success: false, message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error', 
+        errors: error.errors 
+      });
     }
     console.error('Generate system report error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Internal server error' 
+    });
   }
 };
 
@@ -48,10 +69,17 @@ const exportReportToCSV = async (req, res) => {
     res.send(csvContent);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ success: false, message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error', 
+        errors: error.errors 
+      });
     }
     console.error('Export report to CSV error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Internal server error' 
+    });
   }
 };
 
@@ -75,10 +103,17 @@ const getDashboardSummary = async (req, res) => {
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({ success: false, message: 'Validation error', errors: error.errors });
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error', 
+        errors: error.errors 
+      });
     }
     console.error('Get dashboard summary error:', error);
-    res.status(500).json({ success: false, message: error.message || 'Internal server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Internal server error' 
+    });
   }
 };
 
@@ -97,13 +132,23 @@ const getAllManagers = async (req, res) => {
         phone: true,
         role: true,
         isActive: true,
-        createdAt: true
-      }
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { createdAt: 'desc' }
     });
-    res.json({ success: true, data: managers });
+    
+    res.json({ 
+      success: true, 
+      data: managers,
+      count: managers.length 
+    });
   } catch (err) {
     console.error('Get all managers error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch managers' 
+    });
   }
 };
 
@@ -120,17 +165,27 @@ const getAllDrivers = async (req, res) => {
         phone: true,
         role: true,
         isActive: true,
-        createdAt: true
-      }
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { createdAt: 'desc' }
     });
-    res.json({ success: true, data: drivers });
+    
+    res.json({ 
+      success: true, 
+      data: drivers,
+      count: drivers.length 
+    });
   } catch (err) {
     console.error('Get all drivers error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch drivers' 
+    });
   }
 };
 
-// GET all orders — FINAL FIXED VERSION
+// GET all orders
 const getAllOrders = async (req, res) => {
   try {
     const orders = await prisma.quote.findMany({
@@ -139,108 +194,220 @@ const getAllOrders = async (req, res) => {
         client: {
           select: { name: true, email: true, phone: true }
         },
-        manager: {                    // ← CHANGED FROM pricedBy → manager
+        manager: {
           select: { name: true }
         },
         items: {
           include: {
             product: {
-              select: { name: true }    // unit doesn't exist, removed
+              select: { name: true }
             }
           }
         }
       },
       orderBy: { updatedAt: 'desc' }
     });
-    res.json({ success: true, data: orders });
+    
+    res.json({ 
+      success: true, 
+      data: orders,
+      count: orders.length 
+    });
   } catch (err) {
     console.error('Get all orders error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch orders' 
+    });
   }
 };
 
-// CREATE MANAGER — FIXED: NO password field
+// CREATE MANAGER - PRODUCTION VERSION
 const createManager = async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
+    // Validate input
+    const validatedData = createUserSchema.parse(req.body);
+    const { name, email, phone } = validatedData;
 
-    if (!name || !email || !phone) {
-      return res.status(400).json({
-        success: false,
-        message: 'Name, email and phone are required'
+    // Normalize email
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if email already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'A user with this email already exists' 
       });
     }
 
-    const exists = await prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() }
+    // Generate unique identifier for this manager
+    const firebaseUid = generateUniqueId('mgr');
+
+    // Create manager with transaction for safety
+    const manager = await prisma.$transaction(async (tx) => {
+      return await tx.user.create({
+        data: {
+          name: name.trim(),
+          email: normalizedEmail,
+          phone: phone.trim(),
+          role: 'MANAGER',
+          isActive: true,
+          emailVerified: true,
+          firebaseUid: firebaseUid
+        },
+        select: {
+          id: true,
+          firebaseUid: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          isActive: true,
+          createdAt: true
+        }
+      });
     });
 
-    if (exists) {
-      return res.status(400).json({ success: false, message: 'Email already in use' });
-    }
+    console.log(`✅ Manager created: ${manager.email} (${manager.firebaseUid})`);
 
-    const manager = await prisma.user.create({
-      data: {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        role: 'MANAGER',
-        isActive: true,
-        emailVerified: true
-        // NO password field — your schema doesn't have it
-      }
-    });
-
-    res.json({
+    res.status(201).json({
       success: true,
-      message: 'Manager created successfully!',
-      data: { user: manager }
+      message: 'Manager created successfully',
+      data: manager
     });
 
   } catch (err) {
     console.error('Create manager error:', err);
-    if (err.code === 'P2002') {
-      return res.status(400).json({ success: false, message: 'Email already exists' });
+    
+    // Handle validation errors
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error',
+        errors: err.errors 
+      });
     }
-    res.status(500).json({ success: false, message: 'Failed to create manager' });
+    
+    // Handle Prisma errors
+    if (err.code === 'P2002') {
+      const target = err.meta?.target;
+      if (target?.includes('email')) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Email already exists' 
+        });
+      }
+      if (target?.includes('firebaseUid')) {
+        // This should be rare with crypto-generated IDs
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Unique ID conflict. Please try again.' 
+        });
+      }
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create manager. Please try again.' 
+    });
   }
 };
 
-// CREATE DRIVER — FINAL FIXED (no password field)
+// CREATE DRIVER - PRODUCTION VERSION
 const createDriver = async (req, res) => {
   try {
-    const { name, email, phone } = req.body;
-    if (!name || !email || !phone) {
-      return res.status(400).json({ success: false, message: 'Name, email and phone required' });
-    }
+    // Validate input
+    const validatedData = createUserSchema.parse(req.body);
+    const { name, email, phone } = validatedData;
 
-    const exists = await prisma.user.findUnique({
-      where: { email: email.trim().toLowerCase() }
-    });
-    if (exists) {
-      return res.status(400).json({ success: false, message: 'Email already in use' });
-    }
+    // Normalize email
+    const normalizedEmail = email.trim().toLowerCase();
 
-    const driver = await prisma.user.create({
-      data: {
-        name: name.trim(),
-        email: email.trim().toLowerCase(),
-        phone: phone.trim(),
-        role: 'DELIVERY_AGENT',
-        isActive: true,
-        emailVerified: true
-        // ← NO password field (your User model has no password)
-      }
+    // Check if email already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
     });
 
-    res.json({
+    if (existingUser) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'A user with this email already exists' 
+      });
+    }
+
+    // Generate unique identifier for this driver
+    const firebaseUid = generateUniqueId('drv');
+
+    // Create driver with transaction for safety
+    const driver = await prisma.$transaction(async (tx) => {
+      return await tx.user.create({
+        data: {
+          name: name.trim(),
+          email: normalizedEmail,
+          phone: phone.trim(),
+          role: 'DELIVERY_AGENT',
+          isActive: true,
+          emailVerified: true,
+          firebaseUid: firebaseUid
+        },
+        select: {
+          id: true,
+          firebaseUid: true,
+          name: true,
+          email: true,
+          phone: true,
+          role: true,
+          isActive: true,
+          createdAt: true
+        }
+      });
+    });
+
+    console.log(`✅ Driver created: ${driver.email} (${driver.firebaseUid})`);
+
+    res.status(201).json({
       success: true,
-      message: 'Driver created successfully!',
-      data: { user: driver }
+      message: 'Driver created successfully',
+      data: driver
     });
+
   } catch (err) {
     console.error('Create driver error:', err);
-    res.status(500).json({ success: false, message: 'Failed to create driver' });
+    
+    // Handle validation errors
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error',
+        errors: err.errors 
+      });
+    }
+    
+    // Handle Prisma errors
+    if (err.code === 'P2002') {
+      const target = err.meta?.target;
+      if (target?.includes('email')) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Email already exists' 
+        });
+      }
+      if (target?.includes('firebaseUid')) {
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Unique ID conflict. Please try again.' 
+        });
+      }
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to create driver. Please try again.' 
+    });
   }
 };
 
