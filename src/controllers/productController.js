@@ -1,215 +1,136 @@
+// controllers/productController.js — FINAL GOD VERSION
 const { z } = require('zod');
 const prisma = require('../config/prisma');
 
-// Validation schema for no-inventory product catalog
+// NEW VALIDATION — supports image, icon, reference
 const productSchema = z.object({
   name: z.string().min(1, 'Product name is required'),
   sku: z.string().min(1, 'SKU is required'),
-  price: z.number().positive('Price must be positive'), // Reference price only - actual pricing done in quotes
+  price: z.number().positive('Price must be positive'),
   description: z.string().optional(),
   category: z.string().optional(),
+  reference: z.string().optional(),     // ← NEW: e.g. BEER-001
+  icon: z.string().min(1, 'Icon is required'), // ← NEW: emoji or name
+  image: z.string().url().optional().or(z.literal('')), // ← NEW: optional image URL
   active: z.boolean().optional().default(true)
 });
 
-// Get all products (Catalog browsing - no inventory tracking)
+// GET ALL PRODUCTS — Public (clients see this)
 const getProducts = async (req, res) => {
   try {
-    const { active, category } = req.query;
+    const { active = 'true', category } = req.query;
 
-    const whereClause = {};
-    if (active !== undefined) {
-      whereClause.active = active === 'true';
-    }
-    if (category) {
-      whereClause.category = category;
-    }
+    const where = {
+      active: active === 'true'
+    };
+    if (category) where.category = category;
 
     const products = await prisma.product.findMany({
-      where: whereClause,
+      where,
       select: {
         id: true,
         name: true,
         sku: true,
-        price: true, // Reference price - actual pricing done in quotes
+        price: true,
         description: true,
         category: true,
+        reference: true,
+        icon: true,
+        image: true,
         active: true,
         createdAt: true
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { name: 'asc' }
     });
 
     res.json({
       success: true,
-      message: 'Product catalog retrieved. Note: Prices shown are reference prices. Actual pricing will be provided in quotes.',
-      data: { products }
+      count: products.length,
+      data: products
     });
-
   } catch (error) {
     console.error('Get products error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-// Get single product
+// GET SINGLE PRODUCT
 const getProduct = async (req, res) => {
   try {
-    const { id } = req.params;
-
     const product = await prisma.product.findUnique({
-      where: { id }
+      where: { id: req.params.id }
     });
 
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
+    if (!product) return res.status(404).json({ success: false, message: 'Not found' });
 
-    res.json({
-      success: true,
-      data: { product }
-    });
-
+    res.json({ success: true, data: product });
   } catch (error) {
-    console.error('Get product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-// Create product (Admin only) - Adds to catalog for sourcing
+// CREATE PRODUCT — Admin only
 const createProduct = async (req, res) => {
   try {
-    const productData = productSchema.parse(req.body);
+    const data = productSchema.parse(req.body);
 
     const product = await prisma.product.create({
-      data: productData
+      data: {
+        ...data,
+        image: data.image || null,
+        reference: data.reference || null
+      }
     });
 
     res.status(201).json({
       success: true,
-      message: 'Product added to catalog successfully. This product can now be sourced on-demand for quotes.',
-      data: { product }
+      message: 'Product added — clients can now order it!',
+      data: product
     });
-
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        errors: error.errors
-      });
+      return res.status(400).json({ success: false, errors: error.errors });
     }
-
     if (error.code === 'P2002') {
-      return res.status(400).json({
-        success: false,
-        message: 'Product with this SKU already exists'
-      });
+      const field = error.meta?.target?.[0] || 'SKU';
+      return res.status(400).json({ success: false, message: `${field} already exists` });
     }
-
     console.error('Create product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-// Update product (Admin only)
+// UPDATE PRODUCT
 const updateProduct = async (req, res) => {
   try {
-    const { id } = req.params;
-    const productData = productSchema.parse(req.body);
+    const data = productSchema.partial().parse(req.body); // allow partial updates
 
     const product = await prisma.product.update({
-      where: { id },
-      data: productData
+      where: { id: req.params.id },
+      data: {
+        ...data,
+        image: data.image === '' ? null : data.image
+      }
     });
 
-    res.json({
-      success: true,
-      message: 'Product updated successfully',
-      data: { product }
-    });
-
+    res.json({ success: true, message: 'Product updated', data: product });
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation error',
-        errors: error.errors
-      });
-    }
-
-    if (error.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-
-    if (error.code === 'P2002') {
-      return res.status(400).json({
-        success: false,
-        message: 'Product with this SKU already exists'
-      });
-    }
-
-    console.error('Update product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    if (error.code === 'P2025') return res.status(404).json({ success: false, message: 'Not found' });
+    if (error.code === 'P2002') return res.status(400).json({ success: false, message: 'SKU or name already used' });
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-// Delete product (Admin only)
+// SOFT DELETE
 const deleteProduct = async (req, res) => {
   try {
-    const { id } = req.params;
-
-    // Check if product is used in any orders
-    const orderItems = await prisma.orderItem.findFirst({
-      where: { productId: id }
+    await prisma.product.update({
+      where: { id: req.params.id },
+      data: { active: false }
     });
-
-    if (orderItems) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete product that is used in orders'
-      });
-    }
-
-    await prisma.product.delete({
-      where: { id }
-    });
-
-    res.json({
-      success: true,
-      message: 'Product deleted successfully'
-    });
-
+    res.json({ success: true, message: 'Product removed from catalog' });
   } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-
-    console.error('Delete product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Failed' });
   }
 };
 
