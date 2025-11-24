@@ -98,17 +98,25 @@ model Address {
 }
 
 model Product {
-  id            String      @id @default(auto()) @map("_id") @db.ObjectId
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
-  name          String
-  sku           String      @unique
-  description   String?
-  category      String?
-  price         Float
-  active        Boolean     @default(true)
-  orderItems    OrderItem[]
-  quoteItems    QuoteItem[]
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  name        String   @unique
+  sku         String   @unique
+  reference   String?  
+  description String?
+  category    String?
+  price       Float
+  icon        String   
+  image       String? 
+  active      Boolean  
+
+ 
+  orderItems  OrderItem[]
+  quoteItems  QuoteItem[]
+
+  @@map("Product")
 }
 
 model Order {
@@ -137,8 +145,8 @@ model OrderItem {
   updatedAt     DateTime  @updatedAt
   order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
   orderId       String    @db.ObjectId
-  product       Product   @relation(fields: [productId], references: [id])
-  productId     String    @db.ObjectId
+  product   Product @relation(fields: [productId], references: [id])
+  productId String  @db.ObjectId
   quantity      Int
   unitPrice     Float
   subtotal      Float
@@ -166,8 +174,8 @@ model QuoteItem {
   updatedAt     DateTime  @updatedAt
   quote         Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   quoteId       String    @db.ObjectId
-  product       Product   @relation(fields: [productId], references: [id])
-  productId     String    @db.ObjectId
+  product   Product @relation(fields: [productId], references: [id])
+  productId String  @db.ObjectId
   quantity      Int
   unitPrice     Float
   subtotal      Float
