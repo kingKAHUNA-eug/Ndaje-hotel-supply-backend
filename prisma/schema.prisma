@@ -108,7 +108,7 @@ model Product {
   description String?
   category    String?
   price       Float
-  icon        String   
+  icon        String?   
   image       String? 
   active      Boolean  
 
