@@ -22,7 +22,7 @@ const paymentRoutes = require('./routes/payment');
 const adminRoutes = require('./routes/admin');
 const quoteRoutes = require('./routes/quote');
 const deliveryRoutes = require('./routes/delivery');
-const uploadRoutes = require('./routes/upload');
+
 const app = express();
 
 // FIXED CORS — RENDER.COM PROOF
@@ -81,9 +81,6 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 
-
-
-app.use('/api/products', require('./routes/products'));
 
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
 app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
