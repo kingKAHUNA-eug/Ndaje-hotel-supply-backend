@@ -9,7 +9,7 @@ async function ensureUser({ name, email, role, password }) {
   const passwordHash = await bcrypt.hash(password, 12);
   let user = await prisma.user.findUnique({ where: { email } });
   if (!user) {
-    user = await prisma.user.create({
+    user = await prisma.User.create({
       data: { name, email, role, passwordHash }
     });
   } else {

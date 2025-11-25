@@ -4,6 +4,73 @@ const AdminReportService = require('../services/adminReportService');
 const prisma = require('../config/prisma');
 const crypto = require('crypto'); // Built-in Node.js module (no npm install needed)
 
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// ======================== PRODUCT IMAGE UPLOAD ========================
+const uploadProductImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No file uploaded' 
+      });
+    }
+
+    console.log('📤 Uploading image to Cloudinary...');
+
+    // Upload to Cloudinary using buffer from multer
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'ndaje-products',
+          resource_type: 'auto',
+          allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'webp'],
+          transformation: [
+            { width: 1000, height: 1000, crop: 'limit' }, // Max size
+            { quality: 'auto:good' } // Optimize quality
+          ]
+        },
+        (error, result) => {
+          if (error) {
+            console.error('❌ Cloudinary error:', error);
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        }
+      );
+      uploadStream.end(req.file.buffer);
+    });
+
+    console.log('✅ Image uploaded:', result.secure_url);
+
+    res.json({
+      success: true,
+      message: 'Image uploaded successfully',
+      data: { 
+        url: result.secure_url,
+        publicId: result.public_id,
+        width: result.width,
+        height: result.height
+      }
+    });
+  } catch (error) {
+    console.error('❌ Upload error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to upload image' 
+    });
+  }
+};
+
+
+
 // Helper function to generate unique identifiers
 const generateUniqueId = (prefix) => {
   // Using crypto for better randomness than uuid
@@ -420,5 +487,6 @@ module.exports = {
   getAllDrivers,
   getAllOrders,
   createManager,
-  createDriver
+  createDriver,
+  uploadProductImage
 };

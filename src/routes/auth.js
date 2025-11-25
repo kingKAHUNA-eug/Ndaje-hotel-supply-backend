@@ -50,7 +50,7 @@ router.post('/google', async (req, res) => {
     let user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
-      user = await prisma.user.create({
+      user = await prisma.User.create({
         data: {
           email,
           name: name || email.split('@')[0],

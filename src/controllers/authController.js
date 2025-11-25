@@ -69,7 +69,7 @@ const signup = async (req, res) => {
 
     // 5. Save to MongoDB
     try {
-      await prisma.user.create({
+      await prisma.User.create({
         data: {
           firebaseUid: firebaseUser.uid,
           name,
