@@ -6,11 +6,17 @@ const crypto = require('crypto'); // Built-in Node.js module (no npm install nee
 
 const cloudinary = require('cloudinary').v2;
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
+if (process.env.CLOUDINARY_URL) {
+  cloudinary.config(process.env.CLOUDINARY_URL);
+  console.log('✅ Cloudinary configured from CLOUDINARY_URL');
+} else {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+  });
+  console.log('✅ Cloudinary configured from individual env vars');
+}
 
 const uploadProductImage = async (req, res) => {
   try {
@@ -22,33 +28,13 @@ const uploadProductImage = async (req, res) => {
     }
 
     console.log('📤 Uploading image to Cloudinary...');
-    
-    // DEBUG: Print environment variables
-    console.log('🔍 ENV DEBUG:');
-    console.log('  CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME);
-    console.log('  CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY ? `EXISTS (${process.env.CLOUDINARY_API_KEY.substring(0, 4)}...)` : 'MISSING');
-    console.log('  CLOUDINARY_API_SECRET:', process.env.CLOUDINARY_API_SECRET ? `EXISTS (${process.env.CLOUDINARY_API_SECRET.length} chars)` : 'MISSING');
 
-    // Reconfigure cloudinary right before upload (in case it wasn't configured properly at startup)
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET
-    });
-
-    console.log('🔍 Cloudinary config after setup:', cloudinary.config());
-
-    // Rest of your upload code...
     const result = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: 'ndaje-products',
           resource_type: 'auto',
-          allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'webp'],
-          transformation: [
-            { width: 1000, height: 1000, crop: 'limit' },
-            { quality: 'auto:good' }
-          ]
+          allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'webp']
         },
         (error, result) => {
           if (error) {
@@ -69,9 +55,7 @@ const uploadProductImage = async (req, res) => {
       message: 'Image uploaded successfully',
       data: { 
         url: result.secure_url,
-        publicId: result.public_id,
-        width: result.width,
-        height: result.height
+        publicId: result.public_id
       }
     });
   } catch (error) {
@@ -82,7 +66,6 @@ const uploadProductImage = async (req, res) => {
     });
   }
 };
-
 
 // Helper function to generate unique identifiers
 const generateUniqueId = (prefix) => {
