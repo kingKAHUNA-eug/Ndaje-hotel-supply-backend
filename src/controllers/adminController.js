@@ -477,7 +477,37 @@ const createDriver = async (req, res) => {
     });
   }
 };
+// ======================== DEBUG CLOUDINARY CONFIG ========================
+const testCloudinaryConfig = async (req, res) => {
+  try {
+    console.log('🔍 Testing Cloudinary Configuration...');
+    console.log('Cloud Name:', process.env.CLOUDINARY_CLOUD_NAME);
+    console.log('API Key exists:', !!process.env.CLOUDINARY_API_KEY);
+    console.log('API Key length:', process.env.CLOUDINARY_API_KEY?.length);
+    console.log('API Secret exists:', !!process.env.CLOUDINARY_API_SECRET);
+    console.log('API Secret length:', process.env.CLOUDINARY_API_SECRET?.length);
+    
+    // Test if cloudinary is configured
+    const config = cloudinary.config();
+    console.log('Cloudinary config:', {
+      cloud_name: config.cloud_name,
+      api_key_set: !!config.api_key
+    });
 
+    res.json({
+      success: true,
+      data: {
+        cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+        api_key_exists: !!process.env.CLOUDINARY_API_KEY,
+        api_key_length: process.env.CLOUDINARY_API_KEY?.length,
+        api_secret_exists: !!process.env.CLOUDINARY_API_SECRET,
+        api_secret_length: process.env.CLOUDINARY_API_SECRET?.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 // ======================== EXPORT ========================
 module.exports = {
   generateSystemReport,
@@ -488,5 +518,6 @@ module.exports = {
   getAllOrders,
   createManager,
   createDriver,
-  uploadProductImage
+  uploadProductImage,
+  testCloudinaryConfig
 };
