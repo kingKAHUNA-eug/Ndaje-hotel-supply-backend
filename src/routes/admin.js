@@ -12,7 +12,8 @@ const {
   getDashboardSummary,
   generateSystemReport,
   exportReportToCSV,
-  uploadProductImage
+  uploadProductImage,
+  testCloudinaryConfig
 } = require('../controllers/adminController');
 
 // Configure multer for memory storage
@@ -35,6 +36,8 @@ const upload = multer({
 router.use(authenticateToken);
 router.use(requireAdmin);
 
+
+router.get('/test-cloudinary', testCloudinaryConfig);
 // ========== CRITICAL ENDPOINTS (THESE MAKE NDAJE REAL) ==========
 router.get('/managers', getAllManagers);
 router.get('/drivers', getAllDrivers);
