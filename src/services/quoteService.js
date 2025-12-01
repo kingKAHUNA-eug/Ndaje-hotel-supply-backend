@@ -806,56 +806,60 @@ class QuoteService {
    * @param {string} status - Optional status filter
    * @returns {Array} List of quotes
    */
-  static async getClientQuotes(clientId, status = null) {
-    try {
-      const whereClause = {
-        order: {
-          clientId
-        }
-      };
-      if (status) {
-        whereClause.status = status;
-      }
+ // IN QuoteService.js — REPLACE THE WHOLE getClientQuotes FUNCTION
+static async getClientQuotes(clientId, status = null) {
+  try {
+    const whereClause = {
+      clientId,  // ← DIRECTLY ON QUOTE, NOT THROUGH ORDER
+    };
 
-      const quotes = await prisma.quote.findMany({
-        where: whereClause,
-        include: {
-          items: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  description: true,
-                  category: true
-                }
+    if (status) {
+      whereClause.status = status;
+    }
+
+    const quotes = await prisma.quote.findMany({
+      where: whereClause,
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                price: true,
+                image: true,
+                description: true,
+                category: true,
+                icon: true
               }
-            }
-          },
-          manager: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
-          order: {
-            include: {
-              address: true
             }
           }
         },
-        orderBy: { createdAt: 'desc' }
-      });
+        manager: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
 
-      return quotes;
-    } catch (error) {
-      console.error('QuoteService.getClientQuotes error:', error);
-      throw error;
-    }
+    // FINAL SAFETY NET: Remove items with deleted products
+    const safeQuotes = quotes.map(quote => ({
+      ...quote,
+      items: quote.items
+        .filter(item => item.product !== null)
+        .map(item => ({
+          ...item,
+          product: item.product || { name: 'Product deleted', image: null }
+        }))
+    }));
+
+    return safeQuotes;
+  } catch (error) {
+    console.error('QuoteService.getClientQuotes error:', error);
+    throw error;
   }
-
+}
   /**
    * Update quote items (Manager only)
    * @param {string} quoteId - Quote ID
