@@ -1,7 +1,13 @@
 // src/index.js — FIXED FOR RENDER + CORS
 require('dotenv').config();
 console.log('Loaded DATABASE_URL:', process.env.DATABASE_URL?.substring(0, 30) + '...');
-
+const admin = require('firebase-admin');
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  admin.initializeApp({
+    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
+  });
+  console.log('Firebase Admin → LOADED FROM RENDER SECRET FILE — NDAJE IS ALIVE');
+}
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
