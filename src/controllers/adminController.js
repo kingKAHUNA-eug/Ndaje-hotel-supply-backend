@@ -1,10 +1,10 @@
-// controllers/adminController.js - PRODUCTION VERSION
+// controllers/adminController.js
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
 const crypto = require('crypto'); 
 const bcrypt = require('bcrypt');
 const cloudinary = require('cloudinary').v2;
-
+const admin = require('firebase-admin');
 const { prisma } = require('../index');
 
 if (process.env.CLOUDINARY_URL) {
@@ -505,52 +505,64 @@ const testCloudinaryConfig = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-// RESET ANY USER'S PASSWORD (Manager or Driver)
 const resetUserPassword = async (req, res) => {
   const { userId } = req.params;
   const { newPassword } = req.body;
 
-  if (!newPassword || newPassword.length < 4) {
-    return res.status(400).json({ success: false, message: 'Password too short' });
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({
+      success: false,
+      message: 'Password must be at least 6 characters'
+    });
   }
 
   try {
-    const hashed = await bcrypt.hash(newPassword, 10);
-
-    await prisma.user.update({
+    // 1. Find user in Prisma to get their firebaseUid
+    const user = await prisma.user.findUnique({
       where: { id: userId },
-      data: { password: hashed }
+      select: { firebaseUid: true, email: true, name: true }
     });
 
-    res.json({ success: true, message: 'Password reset successfully' });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+
+    if (!user.firebaseUid) {
+      return res.status(400).json({
+        success: false,
+        message: 'This user has no Firebase account (maybe created manually)'
+      });
+    }
+
+    // 2. Reset password in Firebase Auth
+    await admin.auth().updateUser(user.firebaseUid, {
+      password: newPassword
+    });
+
+    // 3. Generate a clean password to show admin once
+    const displayPassword = newPassword;
+
+    // 4. Respond with success + show password once
+    res.json({
+      success: true,
+      message: 'Password reset successfully in Firebase!',
+      newPassword: displayPassword,  // Only shown once in response
+      user: {
+        name: user.name,
+        email: user.email
+      }
+    });
+
   } catch (err) {
-    console.error('Reset password error:', err);
-    res.status(500).json({ success: false, message: 'Failed to reset password' });
+    {
+    console.error('Firebase password reset failed:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset password: ' + err.message
+    });
   }
 };
-
-// DELETE MANAGER
-const deleteManager = async (req, res) => {
-  try {
-    await prisma.user.delete({
-      where: { id: req.params.id, role: 'MANAGER' }
-    });
-    res.json({ success: true, message: 'Manager deleted permanently' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Delete failed — user may not exist' });
-  }
-};
-
-// DELETE DRIVER
-const deleteDriver = async (req, res) => {
-  try {
-    await prisma.user.delete({
-      where: { id: req.params.id, role: 'DRIVER' }
-    });
-    res.json({ success: true, message: 'Driver deleted permanently' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Delete failed — user may not exist' });
-  }
 };
 // ======================== EXPORT ========================
 module.exports = {
