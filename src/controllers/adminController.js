@@ -2,7 +2,9 @@
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
 const prisma = require('../config/prisma');
-const crypto = require('crypto'); // Built-in Node.js module (no npm install needed)
+const crypto = require('crypto'); 
+const bcrypt = require('bcrypt');
+const { prisma } = require('../index');
 
 const cloudinary = require('cloudinary').v2;
 
@@ -504,6 +506,53 @@ const testCloudinaryConfig = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+// RESET ANY USER'S PASSWORD (Manager or Driver)
+const resetUserPassword = async (req, res) => {
+  const { userId } = req.params;
+  const { newPassword } = req.body;
+
+  if (!newPassword || newPassword.length < 4) {
+    return res.status(400).json({ success: false, message: 'Password too short' });
+  }
+
+  try {
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashed }
+    });
+
+    res.json({ success: true, message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reset password' });
+  }
+};
+
+// DELETE MANAGER
+const deleteManager = async (req, res) => {
+  try {
+    await prisma.user.delete({
+      where: { id: req.params.id, role: 'MANAGER' }
+    });
+    res.json({ success: true, message: 'Manager deleted permanently' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Delete failed — user may not exist' });
+  }
+};
+
+// DELETE DRIVER
+const deleteDriver = async (req, res) => {
+  try {
+    await prisma.user.delete({
+      where: { id: req.params.id, role: 'DRIVER' }
+    });
+    res.json({ success: true, message: 'Driver deleted permanently' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Delete failed — user may not exist' });
+  }
+};
 // ======================== EXPORT ========================
 module.exports = {
   generateSystemReport,
@@ -515,5 +564,8 @@ module.exports = {
   createManager,
   createDriver,
   uploadProductImage,
-  testCloudinaryConfig
+  testCloudinaryConfig,
+  resetUserPassword,
+  deleteManager,
+  deleteDriver
 };

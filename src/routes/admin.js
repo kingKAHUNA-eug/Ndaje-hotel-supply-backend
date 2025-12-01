@@ -1,4 +1,4 @@
-// routes/admin.js
+// routes/admin.js — FINAL VERSION — FULL CONTROL ACHIEVED
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
@@ -13,17 +13,18 @@ const {
   generateSystemReport,
   exportReportToCSV,
   uploadProductImage,
-  testCloudinaryConfig
+  testCloudinaryConfig,
+  // NEW: IMPORT THESE FROM CONTROLLER
+  resetUserPassword,
+  deleteManager,
+  deleteDriver
 } = require('../controllers/adminController');
 
 // Configure multer for memory storage
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { 
-    fileSize: 5 * 1024 * 1024 // 5MB limit
-  },
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    // Only allow images
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -32,13 +33,12 @@ const upload = multer({
   }
 });
 
-// Apply auth + admin check to ALL routes
+// PROTECT ALL ROUTES — ADMIN ONLY
 router.use(authenticateToken);
 router.use(requireAdmin);
 
-
+// ========== EXISTING ROUTES (KEEP THEM) ==========
 router.get('/test-cloudinary', testCloudinaryConfig);
-// ========== CRITICAL ENDPOINTS (THESE MAKE NDAJE REAL) ==========
 router.get('/managers', getAllManagers);
 router.get('/drivers', getAllDrivers);
 router.get('/orders', getAllOrders);
@@ -48,9 +48,13 @@ router.post('/create-driver', createDriver);
 
 router.post('/upload/product-image', upload.single('image'), uploadProductImage);
 
-// Your old report routes (keep them)
 router.get('/dashboard/summary', getDashboardSummary);
 router.get('/reports/system', generateSystemReport);
 router.get('/reports/export/csv', exportReportToCSV);
+
+// ========== NEW: TOTAL CONTROL ENDPOINTS ==========
+router.post('/reset-password/:userId', resetUserPassword);     // Reset any user's password
+router.delete('/managers/:id', deleteManager);                 // Delete manager
+router.delete('/drivers/:id', deleteDriver);                   // Delete driver
 
 module.exports = router;
