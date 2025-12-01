@@ -1,12 +1,11 @@
 // controllers/adminController.js - PRODUCTION VERSION
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
-const prisma = require('../config/prisma');
 const crypto = require('crypto'); 
 const bcrypt = require('bcrypt');
-const { prisma } = require('../index');
-
 const cloudinary = require('cloudinary').v2;
+
+const { prisma } = require('../index');
 
 if (process.env.CLOUDINARY_URL) {
   cloudinary.config(process.env.CLOUDINARY_URL);
