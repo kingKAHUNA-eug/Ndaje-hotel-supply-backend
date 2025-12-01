@@ -169,16 +169,19 @@ model Quote {
 }
 
 model QuoteItem {
-  id            String    @id @default(auto()) @map("_id") @db.ObjectId
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  quote         Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  quoteId       String    @db.ObjectId
-  product   Product @relation(fields: [productId], references: [id])
-  productId String  @db.ObjectId
-  quantity      Int
-  unitPrice     Float
-  subtotal      Float
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  quote     Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  quoteId   String   @db.ObjectId
+  product   Product? @relation(fields: [productId], references: [id])  
+  productId String?  @db.ObjectId                                       
+  quantity  Int
+  unitPrice Float
+  subtotal  Float
+
+  @@index([quoteId])
+  @@index([productId])
 }
 
 model Payment {
