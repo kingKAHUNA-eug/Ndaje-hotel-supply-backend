@@ -505,6 +505,8 @@ const testCloudinaryConfig = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+const crypto = require('crypto')
+
 const resetUserPassword = async (req, res) => {
   try {
     const { userId } = req.params
@@ -517,6 +519,7 @@ const resetUserPassword = async (req, res) => {
       })
     }
 
+    // Find user
     const user = await prisma.user.findUnique({
       where: { id: userId }
     })
@@ -528,24 +531,27 @@ const resetUserPassword = async (req, res) => {
       })
     }
 
-    // Store plain password temporarily (will be hashed by Firebase)
+    // Hash password using crypto (built-in Node.js)
+    const salt = crypto.randomBytes(16).toString('hex')
+    const hash = crypto.pbkdf2Sync(newPassword, salt, 1000, 64, 'sha512').toString('hex')
+    const hashedPassword = `${salt}:${hash}`
+
+    // Update database
     await prisma.user.update({
       where: { id: userId },
-      data: { 
-        password: newPassword,  // Store temporarily
-        // We'll rely on Firebase for actual auth
-      }
+      data: { password: hashedPassword }
     })
 
-    // Update Firebase Auth
+    // Try to update Firebase if user has firebaseUid
     if (user.firebaseUid) {
       try {
         const admin = require('../config/firebase')
         await admin.auth().updateUser(user.firebaseUid, {
           password: newPassword
         })
+        console.log(`✅ Firebase password updated for ${user.email}`)
       } catch (firebaseErr) {
-        console.log(`⚠️ Firebase update failed:`, firebaseErr.message)
+        console.log(`⚠️ Firebase update skipped:`, firebaseErr.message)
       }
     }
 
@@ -566,7 +572,6 @@ const resetUserPassword = async (req, res) => {
     })
   }
 }
-
 const deleteManager = async (req, res) => {
   try {
     const { managerId } = req.params
