@@ -505,77 +505,177 @@ const testCloudinaryConfig = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-//NEW: RESET PASSWORD VIA FIREBASE (NO PRISMA PASSWORD FIELD NEEDED)
 const resetUserPassword = async (req, res) => {
-  const { userId } = req.params;
-  const { newPassword } = req.body;
-
-  if (!newPassword || newPassword.length < 6) {
-    return res.status(400).json({ success: false, message: 'Password too short' });
-  }
-
   try {
+    const { userId } = req.params
+    const { newPassword } = req.body
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Password must be at least 6 characters' 
+      })
+    }
+
+    // Find user in database
     const user = await prisma.user.findUnique({
+      where: { id: userId }
+    })
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found' 
+      })
+    }
+
+    // Hash the new password
+    const bcrypt = require('bcryptjs')
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+
+    // Update user password in database
+    await prisma.user.update({
       where: { id: userId },
-      select: { firebaseUid: true, name: true, email: true }
-    });
+      data: { 
+        password: hashedPassword
+        // Don't update Firebase - only update local database
+      }
+    })
 
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (!user.firebaseUid) return res.status(400).json({ success: false, message: 'No Firebase account' });
-
-    // Reset in Firebase
-    await admin.auth().updateUser(user.firebaseUid, { password: newPassword });
+    // If user has firebaseUid, try to update Firebase too (optional)
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().updateUser(user.firebaseUid, {
+          password: newPassword
+        })
+        console.log(`✅ Firebase password updated for ${user.email}`)
+      } catch (firebaseErr) {
+        // Firebase update failed but database succeeded - that's OK
+        console.log(`⚠️ Firebase update skipped for ${user.email}:`, firebaseErr.message)
+      }
+    }
 
     res.json({
       success: true,
-      message: 'Password reset successfully!',
-      newPassword,  // shown once
-      user: { name: user.name, email: user.email }
-    });
+      message: 'Password reset successfully',
+      data: {
+        email: user.email,
+        newPassword: newPassword // Send back so admin can share it
+      }
+    })
 
-  } catch (err) {
-    console.error('Firebase reset error:', err);
-    res.status(500).json({ success: false, message: err.message });
+  } catch (error) {
+    console.error('Reset password error:', error)
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to reset password' 
+    })
   }
-};
+}
 
-// NEW: DELETE MANAGER
 const deleteManager = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id, role: 'MANAGER' }
-    });
-    if (!user) return res.status(404).json({ success: false, message: 'Manager not found' });
+    const { managerId } = req.params
 
-    if (user.firebaseUid) {
-      await admin.auth().deleteUser(user.firebaseUid);
+    const user = await prisma.user.findUnique({
+      where: { id: managerId }
+    })
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Manager not found' 
+      })
     }
 
-    await prisma.user.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Manager deleted forever' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Delete failed' });
-  }
-};
+    if (user.role !== 'MANAGER') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User is not a manager' 
+      })
+    }
 
-// NEW: DELETE DRIVER
+    // Delete from Firebase if has firebaseUid
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().deleteUser(user.firebaseUid)
+        console.log(`✅ Deleted from Firebase: ${user.email}`)
+      } catch (firebaseErr) {
+        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message)
+      }
+    }
+
+    // Delete from database (this is the important part)
+    await prisma.user.delete({
+      where: { id: managerId }
+    })
+
+    res.json({
+      success: true,
+      message: 'Manager deleted successfully'
+    })
+
+  } catch (error) {
+    console.error('Delete manager error:', error)
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete manager' 
+    })
+  }
+}
+
 const deleteDriver = async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id, role: 'DRIVER' }
-    });
-    if (!user) return res.status(404).json({ success: false, message: 'Driver not found' });
+    const { driverId } = req.params
 
-    if (user.firebaseUid) {
-      await admin.auth().deleteUser(user.firebaseUid);
+    const user = await prisma.user.findUnique({
+      where: { id: driverId }
+    })
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Driver not found' 
+      })
     }
 
-    await prisma.user.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Driver deleted forever' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Delete failed' });
+    if (user.role !== 'DELIVERY_AGENT') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'User is not a driver' 
+      })
+    }
+
+    // Delete from Firebase if has firebaseUid
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().deleteUser(user.firebaseUid)
+        console.log(`✅ Deleted from Firebase: ${user.email}`)
+      } catch (firebaseErr) {
+        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message)
+      }
+    }
+
+    // Delete from database
+    await prisma.user.delete({
+      where: { id: driverId }
+    })
+
+    res.json({
+      success: true,
+      message: 'Driver deleted successfully'
+    })
+
+  } catch (error) {
+    console.error('Delete driver error:', error)
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to delete driver' 
+    })
   }
-};
+}
+
+
 
 // ======================== EXPORT ========================
 module.exports = {
