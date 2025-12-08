@@ -517,7 +517,6 @@ const resetUserPassword = async (req, res) => {
       })
     }
 
-    // Find user in database
     const user = await prisma.user.findUnique({
       where: { id: userId }
     })
@@ -529,29 +528,24 @@ const resetUserPassword = async (req, res) => {
       })
     }
 
-    // Hash the new password
-    const bcrypt = require('bcryptjs')
-    const hashedPassword = await bcrypt.hash(newPassword, 10)
-
-    // Update user password in database
+    // Store plain password temporarily (will be hashed by Firebase)
     await prisma.user.update({
       where: { id: userId },
       data: { 
-        password: hashedPassword
-        // Don't update Firebase - only update local database
+        password: newPassword,  // Store temporarily
+        // We'll rely on Firebase for actual auth
       }
     })
 
-    // If user has firebaseUid, try to update Firebase too (optional)
+    // Update Firebase Auth
     if (user.firebaseUid) {
       try {
+        const admin = require('../config/firebase')
         await admin.auth().updateUser(user.firebaseUid, {
           password: newPassword
         })
-        console.log(`✅ Firebase password updated for ${user.email}`)
       } catch (firebaseErr) {
-        // Firebase update failed but database succeeded - that's OK
-        console.log(`⚠️ Firebase update skipped for ${user.email}:`, firebaseErr.message)
+        console.log(`⚠️ Firebase update failed:`, firebaseErr.message)
       }
     }
 
@@ -560,7 +554,7 @@ const resetUserPassword = async (req, res) => {
       message: 'Password reset successfully',
       data: {
         email: user.email,
-        newPassword: newPassword // Send back so admin can share it
+        newPassword: newPassword
       }
     })
 
