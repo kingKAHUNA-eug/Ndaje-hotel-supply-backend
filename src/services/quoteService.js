@@ -1,11 +1,9 @@
 const prisma = require('../config/prisma');
+const LOCK_DURATION_MINUTES = 30;
 
 class QuoteService {
   /**
-   * Create an empty quote (Client only) - NEW FLOW
-   *\ @param {string} clientId - Client ID
-   * @param {string} notes - Optional notes
-   * @returns {Object} Created empty quote
+   * Create an empty quote (Client only)
    */
   static async createEmptyQuote(clientId, notes = null) {
     try {
@@ -41,134 +39,349 @@ class QuoteService {
   }
 
   /**
-   * Add items to quote (Client only) - NEW FLOW
-   * @param {string} quoteId - Quote ID
-   * @param {string} clientId - Client ID
-   * @param {Array} items - Array of items with productId and quantity
-   * @returns {Object} Updated quote
+   * Add items to quote (Client only)
    */
   static async addItemsToQuote(quoteId, clientId, items) {
-  try {
-    // First check if quote exists and belongs to client
-    const quote = await prisma.quote.findFirst({
-      where: {
-        id: quoteId,
-        clientId
-      }
-    });
-
-    if (!quote) {
-      throw new Error('Quote not found or access denied');
-    }
-
-    // Check if quote is in the correct status for modification
-    if (quote.status !== 'PENDING_ITEMS') {
-      const statusMessages = {
-        'PENDING_PRICING': 'Quote is already submitted and awaiting manager pricing. You cannot add more items at this stage.',
-        'AWAITING_CLIENT_APPROVAL': 'Quote is awaiting your approval. You cannot modify items at this stage.',
-        'APPROVED': 'Quote has been approved. You cannot modify items at this stage.',
-        'REJECTED': 'Quote has been rejected. You cannot modify items at this stage.',
-        'CONVERTED_TO_ORDER': 'Quote has been converted to an order. You cannot modify items at this stage.'
-      };
-      
-      throw new Error(statusMessages[quote.status] || 'Quote cannot be modified in its current status');
-    }
-
-    // Get products to verify they exist
-    const productIds = items.map(item => item.productId);
-    const products = await prisma.product.findMany({
-      where: {
-        id: { in: productIds },
-        active: true
-      }
-    });
-
-    if (products.length !== productIds.length) {
-      throw new Error('One or more products not found or inactive');
-    }
-
-    // Delete existing items
-    await prisma.quoteItem.deleteMany({
-      where: { quoteId }
-    });
-
-    // Create new items (no pricing yet)
-    const quoteItemsData = items.map(item => ({
-      quoteId,
-      productId: item.productId,
-      quantity: item.quantity,
-      unitPrice: 0, // Will be set by manager
-      subtotal: 0   // Will be calculated by manager
-    }));
-
-    await prisma.quoteItem.createMany({
-      data: quoteItemsData
-    });
-
-    // Fetch updated quote without changing status
-    const updatedQuote = await prisma.quote.findUnique({
-      where: { id: quoteId },
-      include: {
-        items: {
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                description: true,
-                category: true
-              }
-            }
-          }
-        }
-      }
-    });
-
-    return updatedQuote;
-  } catch (error) {
-    console.error('QuoteService.addItemsToQuote error:', error);
-    throw error;
-  }
-}
-  /**
-   * Update quote pricing (Manager only) - NEW FLOW
-   * @param {string} quoteId - Quote ID
-   * @param {string} managerId - Manager ID
-   * @param {Array} items - Array of items with pricing
-   * @param {string} sourcingNotes - Optional sourcing notes
-   * @returns {Object} Updated quote
-   */
-  static async updateQuotePricing(quoteId, managerId, items, sourcingNotes = null) {
     try {
-      // Verify quote exists and is ready for pricing
       const quote = await prisma.quote.findFirst({
         where: {
           id: quoteId,
-          status: 'PENDING_PRICING'
+          clientId
         }
       });
 
       if (!quote) {
-        throw new Error('Quote not found or not ready for pricing');
+        throw new Error('Quote not found or access denied');
       }
 
-      // Verify all products exist first
+      if (quote.status !== 'PENDING_ITEMS') {
+        const statusMessages = {
+          'PENDING_PRICING': 'Quote is already submitted and awaiting manager pricing. You cannot add more items at this stage.',
+          'AWAITING_CLIENT_APPROVAL': 'Quote is awaiting your approval. You cannot modify items at this stage.',
+          'APPROVED': 'Quote has been approved. You cannot modify items at this stage.',
+          'REJECTED': 'Quote has been rejected. You cannot modify items at this stage.',
+          'CONVERTED_TO_ORDER': 'Quote has been converted to an order. You cannot modify items at this stage.'
+        };
+        
+        throw new Error(statusMessages[quote.status] || 'Quote cannot be modified in its current status');
+      }
+
+      // Get products to verify they exist
+      const productIds = items.map(item => item.productId);
+      const products = await prisma.product.findMany({
+        where: {
+          id: { in: productIds },
+          active: true
+        }
+      });
+
+      if (products.length !== productIds.length) {
+        throw new Error('One or more products not found or inactive');
+      }
+
+      // Delete existing items
+      await prisma.quoteItem.deleteMany({
+        where: { quoteId }
+      });
+
+      // Create new items (no pricing yet)
+      const quoteItemsData = items.map(item => ({
+        quoteId,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: 0,
+        subtotal: 0
+      }));
+
+      await prisma.quoteItem.createMany({
+        data: quoteItemsData
+      });
+
+      // Fetch updated quote
+      const updatedQuote = await prisma.quote.findUnique({
+        where: { id: quoteId },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  description: true,
+                  category: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      return updatedQuote;
+    } catch (error) {
+      console.error('QuoteService.addItemsToQuote error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Client submits quote to manager
+   */
+  static async submitQuoteToManager(quoteId, clientId) {
+    try {
+      const quote = await prisma.quote.findFirst({
+        where: {
+          id: quoteId,
+          clientId
+        },
+        include: {
+          items: true
+        }
+      });
+
+      if (!quote) {
+        throw new Error('Quote not found or access denied');
+      }
+
+      if (quote.status !== 'PENDING_ITEMS') {
+        throw new Error('Quote is not in the correct state for submission');
+      }
+
+      if (!quote.items || quote.items.length === 0) {
+        throw new Error('Quote must have at least one item before submission');
+      }
+
+      // Update quote status to PENDING_PRICING
+      const updatedQuote = await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          status: 'PENDING_PRICING'
+        },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  description: true,
+                  category: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      return updatedQuote;
+    } catch (error) {
+      console.error('QuoteService.submitQuoteToManager error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manager locks quote for pricing
+   */
+  static async lockQuoteForPricing(quoteId, managerId) {
+    try {
+      const quote = await prisma.quote.findUnique({
+        where: { id: quoteId }
+      });
+
+      if (!quote) {
+        throw new Error('Quote not found');
+      }
+
+      if (quote.status !== 'PENDING_PRICING' && quote.status !== 'IN_PRICING') {
+        throw new Error('Quote is not ready for pricing');
+      }
+
+      // Check if quote is already locked by another manager
+      if (quote.lockedById && quote.lockedById !== managerId) {
+        // Check if lock has expired
+        if (quote.lockExpiresAt && new Date() < quote.lockExpiresAt) {
+          const lockedManager = await prisma.user.findUnique({
+            where: { id: quote.lockedById },
+            select: { name: true }
+          });
+          throw new Error(`Quote is being handled by ${lockedManager?.name || 'another manager'}. Please try another quote.`);
+        }
+      }
+
+      const lockExpiresAt = new Date();
+      lockExpiresAt.setMinutes(lockExpiresAt.getMinutes() + LOCK_DURATION_MINUTES);
+
+      const updatedQuote = await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          status: 'IN_PRICING',
+          lockedById: managerId,
+          lockedAt: new Date(),
+          lockExpiresAt,
+          managerId
+        },
+        include: {
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  description: true,
+                  category: true
+                }
+              }
+            }
+          },
+          client: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true
+            }
+          }
+        }
+      });
+
+      return updatedQuote;
+    } catch (error) {
+      console.error('QuoteService.lockQuoteForPricing error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manager releases quote lock
+   */
+  static async releaseQuoteLock(quoteId, managerId) {
+    try {
+      const quote = await prisma.quote.findUnique({
+        where: { id: quoteId }
+      });
+
+      if (!quote) {
+        throw new Error('Quote not found');
+      }
+
+      if (quote.lockedById !== managerId) {
+        throw new Error('You do not have a lock on this quote');
+      }
+
+      return await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          status: 'PENDING_PRICING',
+          lockedById: null,
+          lockedAt: null,
+          lockExpiresAt: null,
+          managerId: null
+        }
+      });
+    } catch (error) {
+      console.error('QuoteService.releaseQuoteLock error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Check quote lock status
+   */
+  static async checkQuoteLockStatus(quoteId, managerId) {
+    try {
+      const quote = await prisma.quote.findUnique({
+        where: { id: quoteId },
+        include: {
+          lockedBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          }
+        }
+      });
+
+      if (!quote) {
+        throw new Error('Quote not found');
+      }
+
+      const isLocked = quote.lockedById && quote.lockedById !== managerId;
+      const isLockedByMe = quote.lockedById === managerId;
+      const isExpired = quote.lockExpiresAt && new Date() > quote.lockExpiresAt;
+      const canTakeOver = isLocked && isExpired;
+
+      return {
+        isLocked,
+        isLockedByMe,
+        isExpired,
+        canTakeOver,
+        lockedById: quote.lockedById,
+        lockedAt: quote.lockedAt,
+        lockExpiresAt: quote.lockExpiresAt,
+        lockedBy: quote.lockedBy,
+        status: quote.status
+      };
+    } catch (error) {
+      console.error('QuoteService.checkQuoteLockStatus error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Manager updates pricing
+   */
+  static async updateQuotePricing(quoteId, managerId, items, sourcingNotes = null) {
+    try {
+      // First check lock status
+      const lockStatus = await this.checkQuoteLockStatus(quoteId, managerId);
+      
+      if (lockStatus.isLocked && !lockStatus.isLockedByMe) {
+        if (!lockStatus.canTakeOver) {
+          throw new Error('You do not have an active lock on this quote. Please lock it first.');
+        }
+        // If lock expired, manager can take over
+        await this.lockQuoteForPricing(quoteId, managerId);
+      } else if (!lockStatus.isLockedByMe) {
+        // Quote is not locked by this manager at all
+        throw new Error('You do not have a lock on this quote. Please lock it first.');
+      }
+
+      // Verify quote exists and is in correct status
+      const quote = await prisma.quote.findFirst({
+        where: {
+          id: quoteId,
+          status: 'IN_PRICING'
+        },
+        include: { items: true }
+      });
+
+      if (!quote) {
+        throw new Error('Quote not found or not in pricing state');
+      }
+
+      // Verify all products exist
       const productIds = items.map(item => item.productId);
       const existingProducts = await prisma.product.findMany({
-        where: { id: { in: productIds } },
-        select: { id: true }
+        where: { id: { in: productIds } }
       });
       
-      const existingProductIds = existingProducts.map(p => p.id);
-      const missingProducts = productIds.filter(id => !existingProductIds.includes(id));
-      
-      if (missingProducts.length > 0) {
-        throw new Error(`Products not found: ${missingProducts.join(', ')}`);
+      if (existingProducts.length !== productIds.length) {
+        throw new Error('One or more products not found');
       }
 
       // Calculate total amount
       let totalAmount = 0;
+      
+      // Delete existing items
+      await prisma.quoteItem.deleteMany({
+        where: { quoteId }
+      });
+
+      // Create new items with pricing
       const quoteItemsData = items.map(item => {
         const subtotal = item.quantity * item.unitPrice;
         totalAmount += subtotal;
@@ -182,25 +395,21 @@ class QuoteService {
         };
       });
 
-      // Delete existing items
-      await prisma.quoteItem.deleteMany({
-        where: { quoteId }
-      });
-
-      // Create new items with pricing
       await prisma.quoteItem.createMany({
         data: quoteItemsData
       });
 
-      // Update quote with pricing and assign manager
+      // Update quote with pricing and release lock
       const updatedQuote = await prisma.quote.update({
         where: { id: quoteId },
         data: {
-          managerId,
           totalAmount,
           status: 'AWAITING_CLIENT_APPROVAL',
-          validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-          sourcingNotes: sourcingNotes || null
+          validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          sourcingNotes: sourcingNotes || null,
+          lockedById: null,
+          lockedAt: null,
+          lockExpiresAt: null
         },
         include: {
           items: {
@@ -234,37 +443,33 @@ class QuoteService {
   }
 
   /**
-   * Submit quote to manager (Client only) - NEW FLOW
-   * @param {string} quoteId - Quote ID
-   * @param {string} clientId - Client ID
-   * @returns {Object} Submitted quote
+   * Client approves quote
    */
-  static async submitQuoteToManager(quoteId, clientId) {
+  static async approveQuote(quoteId, clientId) {
     try {
       const quote = await prisma.quote.findFirst({
         where: {
           id: quoteId,
-          clientId,
-          status: 'PENDING_ITEMS'
-        },
-        include: {
-          items: true
+          clientId
         }
       });
 
       if (!quote) {
-        throw new Error('Quote not found or cannot be submitted');
+        throw new Error('Quote not found or access denied');
       }
 
-      if (!quote.items || quote.items.length === 0) {
-        throw new Error('Quote must have at least one item before submission');
+      if (quote.status !== 'AWAITING_CLIENT_APPROVAL') {
+        throw new Error('Quote cannot be approved in current state');
       }
 
-      // Update quote status to PENDING_PRICING
-      const updatedQuote = await prisma.quote.update({
+      const validUntil = new Date();
+      validUntil.setDate(validUntil.getDate() + 30);
+
+      return await prisma.quote.update({
         where: { id: quoteId },
         data: {
-          status: 'PENDING_PRICING'
+          status: 'APPROVED',
+          validUntil
         },
         include: {
           items: {
@@ -280,7 +485,7 @@ class QuoteService {
               }
             }
           },
-          client: {
+          manager: {
             select: {
               id: true,
               name: true,
@@ -289,54 +494,50 @@ class QuoteService {
           }
         }
       });
-
-      return updatedQuote;
     } catch (error) {
-      console.error('QuoteService.submitQuoteToManager error:', error);
+      console.error('QuoteService.approveQuote error:', error);
       throw error;
     }
   }
 
   /**
-   * Finalize quote (Manager only) - NEW FLOW
-   * @param {string} quoteId - Quote ID
-   * @param {string} managerId - Manager ID
-   * @returns {Object} Finalized quote
+   * Client rejects quote
    */
-  static async finalizeQuote(quoteId, managerId) {
+  static async rejectQuote(quoteId, clientId, reason = null) {
     try {
       const quote = await prisma.quote.findFirst({
         where: {
           id: quoteId,
-          managerId,
-          status: 'AWAITING_CLIENT_APPROVAL'
+          clientId
         }
       });
 
       if (!quote) {
-        throw new Error('Quote not found or cannot be finalized');
+        throw new Error('Quote not found or access denied');
       }
 
-      // Quote is already in AWAITING_CLIENT_APPROVAL status
-      // This method can be used for additional manager actions if needed
-      return quote;
+      if (quote.status !== 'AWAITING_CLIENT_APPROVAL') {
+        throw new Error('Quote cannot be rejected in current state');
+      }
+
+      return await prisma.quote.update({
+        where: { id: quoteId },
+        data: {
+          status: 'REJECTED',
+          sourcingNotes: reason ? `${quote.sourcingNotes || ''}\nRejected: ${reason}`.trim() : quote.sourcingNotes
+        }
+      });
     } catch (error) {
-      console.error('QuoteService.finalizeQuote error:', error);
+      console.error('QuoteService.rejectQuote error:', error);
       throw error;
     }
   }
 
   /**
-   * Convert quote to order (Client only) - NEW FLOW
-   * @param {string} quoteId - Quote ID
-   * @param {string} clientId - Client ID
-   * @param {string} addressId - Address ID
-   * @param {string} paymentMethod - Payment method
-   * @returns {Object} Created order
+   * Convert quote to order
    */
   static async convertToOrder(quoteId, clientId, addressId, paymentMethod = 'MTN_MOMO') {
     try {
-      // Verify quote exists and is approved
       const quote = await prisma.quote.findFirst({
         where: {
           id: quoteId,
@@ -356,7 +557,7 @@ class QuoteService {
         throw new Error('Quote not found or not approved');
       }
 
-      // Verify address belongs to client
+      // Verify address
       const address = await prisma.address.findFirst({
         where: {
           id: addressId,
@@ -369,47 +570,42 @@ class QuoteService {
       }
 
       // Create order from quote
-      const order = await prisma.order.create({
-        data: {
-          clientId,
-          addressId,
-          total: quote.totalAmount,
-          status: 'AWAITING_PAYMENT',
-          notes: quote.sourcingNotes,
-          quoteId,
-          items: {
-            create: quote.items.map(item => ({
-              productId: item.productId,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              subtotal: item.subtotal
-            }))
+      const order = await prisma.$transaction(async (tx) => {
+        const newOrder = await tx.order.create({
+          data: {
+            clientId,
+            addressId,
+            total: quote.totalAmount,
+            status: 'AWAITING_PAYMENT',
+            notes: quote.sourcingNotes,
+            quoteId
           }
-        },
-        include: {
-          items: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  price: true
-                }
-              }
-            }
-          },
-          address: true
-        }
-      });
+        });
 
-      // Update quote status
-      await prisma.quote.update({
-        where: { id: quoteId },
-        data: { 
-          status: 'CONVERTED_TO_ORDER',
-          orderId: order.id
-        }
+        // Create order items
+        await Promise.all(
+          quote.items.map(item =>
+            tx.orderItem.create({
+              data: {
+                orderId: newOrder.id,
+                productId: item.productId,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                subtotal: item.subtotal
+              }
+            })
+          )
+        );
+
+        // Update quote status
+        await tx.quote.update({
+          where: { id: quoteId },
+          data: { 
+            status: 'CONVERTED_TO_ORDER'
+          }
+        });
+
+        return newOrder;
       });
 
       return order;
@@ -421,8 +617,6 @@ class QuoteService {
 
   /**
    * Get quote by ID
-   * @param {string} quoteId - Quote ID
-   * @returns {Object} Quote details
    */
   static async getQuoteById(quoteId) {
     try {
@@ -449,9 +643,11 @@ class QuoteService {
               email: true
             }
           },
-          order: {
-            include: {
-              address: true
+          client: {
+            select: {
+              id: true,
+              name: true,
+              email: true
             }
           }
         }
@@ -465,66 +661,18 @@ class QuoteService {
   }
 
   /**
-   * Create a quote for an order (Manager only) - LEGACY METHOD
-   * @param {string} orderId - Order ID
-   * @param {string} managerId - Manager ID
-   * @param {Array} quoteItems - Array of items with manager-set prices
-   * @param {string} sourcingNotes - Optional sourcing notes
-   * @returns {Object} Created quote
+   * Get available quotes for manager
    */
-  static async createQuote(orderId, managerId, quoteItems, sourcingNotes = null) {
+  static async getAvailableQuotes(managerId) {
     try {
-      // Verify order exists and is in PENDING_QUOTE status
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        include: {
-          items: {
-            include: {
-              product: true
-            }
-          },
-          quote: true
-        }
-      });
-
-      if (!order) {
-        throw new Error('Order not found');
-      }
-
-      if (order.status !== 'PENDING_QUOTE') {
-        throw new Error('Order is not in pending quote status');
-      }
-
-      if (order.quote) {
-        throw new Error('Quote already exists for this order');
-      }
-
-      // Calculate total amount
-      let totalAmount = 0;
-      const quoteItemsData = quoteItems.map(item => {
-        const subtotal = item.quantity * item.unitPrice;
-        totalAmount += subtotal;
-        
-        return {
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          subtotal
-        };
-      });
-
-      // Create quote with items
-      const quote = await prisma.quote.create({
-        data: {
-          orderId,
-          managerId,
-          totalAmount,
-          sourcingNotes,
-          validUntil: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
-          status: 'GENERATED',
-          items: {
-            create: quoteItemsData
-          }
+      const quotes = await prisma.quote.findMany({
+        where: {
+          status: 'PENDING_PRICING',
+          OR: [
+            { lockedById: null },
+            { lockedById: managerId },
+            { lockExpiresAt: { lt: new Date() } }
+          ]
         },
         include: {
           items: {
@@ -540,223 +688,38 @@ class QuoteService {
               }
             }
           },
-          manager: {
+          client: {
             select: {
               id: true,
               name: true,
-              email: true
+              email: true,
+              phone: true
             }
           }
-        }
-      });
-
-      // Update order status to AWAITING_CLIENT_APPROVAL
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'AWAITING_CLIENT_APPROVAL',
-          total: totalAmount,
-          managerId
-        }
-      });
-
-      return quote;
-    } catch (error) {
-      console.error('QuoteService.createQuote error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get quote by order ID
-   * @param {string} orderId - Order ID
-   * @returns {Object} Quote details
-   */
-  static async getQuoteByOrderId(orderId) {
-    try {
-      const quote = await prisma.quote.findUnique({
-        where: { orderId },
-        include: {
-          items: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  description: true,
-                  category: true
-                }
-              }
-            }
-          },
-          manager: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
-          },
-          order: {
-            include: {
-              client: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true
-                }
-              },
-              address: true
-            }
-          }
-        }
-      });
-
-      return quote;
-    } catch (error) {
-      console.error('QuoteService.getQuoteByOrderId error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Approve quote by client
-   * @param {string} orderId - Order ID
-   * @param {string} clientId - Client ID
-   * @returns {Object} Updated quote
-   */
-  static async approveQuote(orderId, clientId) {
-    try {
-      // Verify order belongs to client
-      const order = await prisma.order.findFirst({
-        where: {
-          id: orderId,
-          clientId
         },
-        include: {
-          quote: true
-        }
+        orderBy: { createdAt: 'desc' }
       });
 
-      if (!order) {
-        throw new Error('Order not found or access denied');
-      }
-
-      if (!order.quote) {
-        throw new Error('No quote found for this order');
-      }
-
-      if (order.quote.status !== 'GENERATED') {
-        throw new Error('Quote has already been processed');
-      }
-
-      if (order.status !== 'AWAITING_CLIENT_APPROVAL') {
-        throw new Error('Order is not awaiting client approval');
-      }
-
-      // Update quote status
-      const updatedQuote = await prisma.quote.update({
-        where: { orderId },
-        data: {
-          status: 'APPROVED'
-        },
-        include: {
-          items: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  description: true,
-                  category: true
-                }
-              }
-            }
-          }
-        }
-      });
-
-      // Update order status to AWAITING_PAYMENT
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'AWAITING_PAYMENT'
-        }
-      });
-
-      return updatedQuote;
+      return quotes;
     } catch (error) {
-      console.error('QuoteService.approveQuote error:', error);
+      console.error('QuoteService.getAvailableQuotes error:', error);
       throw error;
     }
   }
 
   /**
-   * Reject quote by client
-   * @param {string} orderId - Order ID
-   * @param {string} clientId - Client ID
-   * @param {string} reason - Rejection reason
-   * @returns {Object} Updated quote
-   */
-  static async rejectQuote(orderId, clientId, reason = null) {
-    try {
-      // Verify order belongs to client
-      const order = await prisma.order.findFirst({
-        where: {
-          id: orderId,
-          clientId
-        },
-        include: {
-          quote: true
-        }
-      });
-
-      if (!order) {
-        throw new Error('Order not found or access denied');
-      }
-
-      if (!order.quote) {
-        throw new Error('No quote found for this order');
-      }
-
-      if (order.quote.status !== 'GENERATED') {
-        throw new Error('Quote has already been processed');
-      }
-
-      // Update quote status
-      const updatedQuote = await prisma.quote.update({
-        where: { orderId },
-        data: {
-          status: 'REJECTED',
-          sourcingNotes: reason ? `${order.quote.sourcingNotes || ''}\nRejection reason: ${reason}`.trim() : order.quote.sourcingNotes
-        }
-      });
-
-      // Update order status to REJECTED
-      await prisma.order.update({
-        where: { id: orderId },
-        data: {
-          status: 'REJECTED'
-        }
-      });
-
-      return updatedQuote;
-    } catch (error) {
-      console.error('QuoteService.rejectQuote error:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get all quotes for a manager
-   * @param {string} managerId - Manager ID
-   * @param {string} status - Optional status filter
-   * @returns {Array} List of quotes
+   * Get manager quotes
    */
   static async getManagerQuotes(managerId, status = null) {
     try {
-      const whereClause = { managerId };
+      const whereClause = {
+        OR: [
+          { managerId },
+          { status: 'PENDING_PRICING' },
+          { status: 'IN_PRICING', lockedById: managerId }
+        ]
+      };
+
       if (status) {
         whereClause.status = status;
       }
@@ -777,16 +740,12 @@ class QuoteService {
               }
             }
           },
-          order: {
-            include: {
-              client: {
-                select: {
-                  id: true,
-                  name: true,
-                  email: true
-                }
-              },
-              address: true
+          client: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true
             }
           }
         },
@@ -801,115 +760,17 @@ class QuoteService {
   }
 
   /**
-   * Get all quotes for a client
-   * @param {string} clientId - Client ID
-   * @param {string} status - Optional status filter
-   * @returns {Array} List of quotes
+   * Get client quotes
    */
- // IN QuoteService.js — REPLACE THE WHOLE getClientQuotes FUNCTION
-static async getClientQuotes(clientId, status = null) {
-  try {
-    const whereClause = {
-      clientId,  // ← DIRECTLY ON QUOTE, NOT THROUGH ORDER
-    };
-
-    if (status) {
-      whereClause.status = status;
-    }
-
-    const quotes = await prisma.quote.findMany({
-      where: whereClause,
-      include: {
-        items: {
-          include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                sku: true,
-                price: true,
-                image: true,
-                description: true,
-                category: true,
-                icon: true
-              }
-            }
-          }
-        },
-        manager: {
-          select: { id: true, name: true, email: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    // FINAL SAFETY NET: Remove items with deleted products
-    const safeQuotes = quotes.map(quote => ({
-      ...quote,
-      items: quote.items
-        .filter(item => item.product !== null)
-        .map(item => ({
-          ...item,
-          product: item.product || { name: 'Product deleted', image: null }
-        }))
-    }));
-
-    return safeQuotes;
-  } catch (error) {
-    console.error('QuoteService.getClientQuotes error:', error);
-    throw error;
-  }
-}
-  /**
-   * Update quote items (Manager only)
-   * @param {string} quoteId - Quote ID
-   * @param {string} managerId - Manager ID
-   * @param {Array} quoteItems - Updated quote items
-   * @returns {Object} Updated quote
-   */
-  static async updateQuoteItems(quoteId, managerId, quoteItems) {
+  static async getClientQuotes(clientId, status = null) {
     try {
-      // Verify quote exists and belongs to manager
-      const quote = await prisma.quote.findFirst({
-        where: {
-          id: quoteId,
-          managerId,
-          status: 'GENERATED'
-        }
-      });
-
-      if (!quote) {
-        throw new Error('Quote not found or cannot be updated');
+      const whereClause = { clientId };
+      if (status) {
+        whereClause.status = status;
       }
 
-      // Delete existing quote items
-      await prisma.quoteItem.deleteMany({
-        where: { quoteId }
-      });
-
-      // Calculate new total
-      let totalAmount = 0;
-      const quoteItemsData = quoteItems.map(item => {
-        const subtotal = item.quantity * item.unitPrice;
-        totalAmount += subtotal;
-        
-        return {
-          productId: item.productId,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          subtotal
-        };
-      });
-
-      // Create new quote items
-      await prisma.quoteItem.createMany({
-        data: quoteItemsData
-      });
-
-      // Update quote total
-      const updatedQuote = await prisma.quote.update({
-        where: { id: quoteId },
-        data: { totalAmount },
+      const quotes = await prisma.quote.findMany({
+        where: whereClause,
         include: {
           items: {
             include: {
@@ -918,24 +779,64 @@ static async getClientQuotes(clientId, status = null) {
                   id: true,
                   name: true,
                   sku: true,
+                  price: true,
+                  image: true,
                   description: true,
-                  category: true
+                  category: true,
+                  icon: true
                 }
               }
             }
+          },
+          manager: {
+            select: { id: true, name: true, email: true }
           }
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      // Filter out items with null products
+      const safeQuotes = quotes.map(quote => ({
+        ...quote,
+        items: quote.items
+          .filter(item => item.product !== null)
+          .map(item => ({
+            ...item,
+            product: item.product || { name: 'Product deleted', image: null }
+          }))
+      }));
+
+      return safeQuotes;
+    } catch (error) {
+      console.error('QuoteService.getClientQuotes error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up expired locks
+   */
+  static async cleanupExpiredLocks() {
+    try {
+      const result = await prisma.quote.updateMany({
+        where: {
+          status: 'IN_PRICING',
+          lockExpiresAt: {
+            lt: new Date()
+          }
+        },
+        data: {
+          status: 'PENDING_PRICING',
+          lockedById: null,
+          lockedAt: null,
+          lockExpiresAt: null,
+          managerId: null
         }
       });
 
-      // Update order total
-      await prisma.order.update({
-        where: { id: quote.orderId },
-        data: { total: totalAmount }
-      });
-
-      return updatedQuote;
+      return { count: result.count };
     } catch (error) {
-      console.error('QuoteService.updateQuoteItems error:', error);
+      console.error('QuoteService.cleanupExpiredLocks error:', error);
       throw error;
     }
   }

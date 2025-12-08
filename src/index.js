@@ -14,7 +14,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin } = require('./middlewares/auth');
-
+const { setupCronJobs } = require('./services/cronService');
 // ────── Prisma export ──────
 const prisma = new PrismaClient();
 module.exports.prisma = prisma;
@@ -30,7 +30,7 @@ const quoteRoutes = require('./routes/quote');
 const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
-
+setupCronJobs();
 // FIXED CORS — RENDER.COM PROOF
 const corsOptions = {
   origin: [

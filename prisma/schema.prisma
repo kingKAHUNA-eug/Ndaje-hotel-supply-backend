@@ -48,6 +48,7 @@ enum PaymentStatus {
 enum QuoteStatus {
   PENDING_ITEMS
   PENDING_PRICING
+  IN_PRICING
   AWAITING_CLIENT_APPROVAL
   APPROVED
   REJECTED
@@ -76,6 +77,7 @@ model User {
   quotes              Quote[]               @relation("ManagerQuotes")
   clientQuotes        Quote[]               @relation("ClientQuotes")
   deliveries          Delivery[]            @relation("DeliveryAgent")
+  lockedQuotes        Quote[]               @relation("LockedQuotes")
 }
 model Address {
   id            String    @id @default(auto()) @map("_id") @db.ObjectId
@@ -163,8 +165,20 @@ model Quote {
   totalAmount   Float       @default(0)
   sourcingNotes String?
   validUntil    DateTime?
+  
+  // Locking mechanism fields
+  lockedById    String?     @db.ObjectId  // Which manager is currently working on it
+  lockedAt      DateTime?  
+  lockExpiresAt DateTime?   
+  
+  // Update this line with relation name
+  lockedBy      User?       @relation("LockedQuotes", fields: [lockedById], references: [id])
+  
   items         QuoteItem[]
   order         Order?      @relation("OrderQuote")
+  
+  @@index([status])
+  @@index([lockedById])
 }
 
 model QuoteItem {

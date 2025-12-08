@@ -16,7 +16,11 @@ const {
   convertQuoteToOrder,
   getQuoteById,
   getManagerQuotes,
-  getClientQuotes
+  getClientQuotes,
+  lockQuoteForPricing,
+  releaseQuoteLock,
+  checkQuoteLockStatus,
+  getAvailableQuotes
 } = require('../controllers/quoteController');
 
 // All routes require authentication
@@ -26,17 +30,23 @@ router.use(authenticateToken);
 router.post('/', requireClient, createEmptyQuote);
 router.post('/:quoteId/add-items', requireClient, addQuoteItems);
 router.put('/:quoteId/finalize', requireClient, finalizeQuote);
-router.post('/approve', requireClient, approveQuote);
-router.post('/reject', requireClient, rejectQuote);
-router.post('/convert/:quoteId', requireClient, convertQuoteToOrder);
+router.put('/:quoteId/approve', requireClient, approveQuote);
+router.put('/:quoteId/reject', requireClient, rejectQuote);
+router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 
-// Manager routes
+// Manager locking routes
+router.post('/lock', requireManager, lockQuoteForPricing);
+router.put('/:quoteId/release-lock', requireManager, releaseQuoteLock);
+router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
+router.get('/manager/available', requireManager, getAvailableQuotes);
+
+// Manager pricing route (updated)
 router.put('/:quoteId/update-pricing', requireManager, updateQuoteItems);
-router.post('/:quoteId/approve', requireManager, approveQuote);
-router.post('/:quoteId/reject', requireManager, rejectQuote);
-router.get('/manager/pending', requireManager, getManagerQuotes);
 
-// Client routes for quotes
+// Manager quotes route
+router.get('/manager/quotes', requireManager, getManagerQuotes);
+
+// Client quotes route
 router.get('/client/my-quotes', requireClient, getClientQuotes);
 
 // Shared route
