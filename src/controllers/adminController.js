@@ -3,10 +3,12 @@ const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
 const crypto = require('crypto'); 
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const admin = require('firebase-admin');
 const { prisma } = require('../index');
 
+// Configure Cloudinary
 if (process.env.CLOUDINARY_URL) {
   cloudinary.config(process.env.CLOUDINARY_URL);
   console.log('✅ Cloudinary configured from CLOUDINARY_URL');
@@ -19,6 +21,41 @@ if (process.env.CLOUDINARY_URL) {
   console.log('✅ Cloudinary configured from individual env vars');
 }
 
+// Helper function to generate unique identifiers
+const generateUniqueId = (prefix) => {
+  const randomString = crypto.randomBytes(16).toString('hex');
+  const timestamp = Date.now().toString(36);
+  return `${prefix}_${timestamp}_${randomString}`;
+};
+
+// Helper function to generate random password
+const generateRandomPassword = (length = 8) => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+// Validation schemas
+const reportFiltersSchema = z.object({
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+  status: z.string().optional()
+});
+
+const createUserSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  email: z.string().email('Invalid email format'),
+  phone: z.string().min(10, 'Phone must be at least 10 characters')
+});
+
+const resetPasswordSchema = z.object({
+  newPassword: z.string().min(6, 'Password must be at least 6 characters')
+});
+
+// ======================== IMAGE UPLOAD ========================
 const uploadProductImage = async (req, res) => {
   try {
     if (!req.file) {
@@ -67,27 +104,6 @@ const uploadProductImage = async (req, res) => {
     });
   }
 };
-
-// Helper function to generate unique identifiers
-const generateUniqueId = (prefix) => {
-  // Using crypto for better randomness than uuid
-  const randomString = crypto.randomBytes(16).toString('hex');
-  const timestamp = Date.now().toString(36);
-  return `${prefix}_${timestamp}_${randomString}`;
-};
-
-// Validation schemas
-const reportFiltersSchema = z.object({
-  startDate: z.string().datetime().optional(),
-  endDate: z.string().datetime().optional(),
-  status: z.string().optional()
-});
-
-const createUserSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email format'),
-  phone: z.string().min(10, 'Phone must be at least 10 characters')
-});
 
 // ======================== REPORTS ========================
 const generateSystemReport = async (req, res) => {
@@ -286,7 +302,7 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// CREATE MANAGER - PRODUCTION VERSION
+// CREATE MANAGER - UPDATED WITH PASSWORD
 const createManager = async (req, res) => {
   try {
     // Validate input
@@ -308,40 +324,50 @@ const createManager = async (req, res) => {
       });
     }
 
-    // Generate unique identifier for this manager
+    // Generate temporary password
+    const temporaryPassword = generateRandomPassword(10);
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+    // Generate unique identifier
     const firebaseUid = generateUniqueId('mgr');
 
-    // Create manager with transaction for safety
-    const manager = await prisma.$transaction(async (tx) => {
-      return await tx.user.create({
-        data: {
-          name: name.trim(),
-          email: normalizedEmail,
-          phone: phone.trim(),
-          role: 'MANAGER',
-          isActive: true,
-          emailVerified: true,
-          firebaseUid: firebaseUid
-        },
-        select: {
-          id: true,
-          firebaseUid: true,
-          name: true,
-          email: true,
-          phone: true,
-          role: true,
-          isActive: true,
-          createdAt: true
-        }
-      });
+    // Create manager
+    const manager = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: phone.trim(),
+        role: 'MANAGER',
+        isActive: true,
+        isVerified: true,
+        emailVerified: true,
+        firebaseUid: firebaseUid,
+        // Add this line to set the password in the database
+        password: hashedPassword
+      },
+      select: {
+        id: true,
+        firebaseUid: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        createdAt: true
+      }
     });
 
-    console.log(`✅ Manager created: ${manager.email} (${manager.firebaseUid})`);
+    console.log(`✅ Manager created: ${manager.email}`);
+    console.log(`📋 Temporary password: ${temporaryPassword}`);
 
     res.status(201).json({
       success: true,
       message: 'Manager created successfully',
-      data: manager
+      data: {
+        manager: manager,
+        temporaryPassword: temporaryPassword, // Send this to admin
+        loginInstructions: 'Manager can login with this temporary password and should change it on first login'
+      }
     });
 
   } catch (err) {
@@ -358,20 +384,10 @@ const createManager = async (req, res) => {
     
     // Handle Prisma errors
     if (err.code === 'P2002') {
-      const target = err.meta?.target;
-      if (target?.includes('email')) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Email already exists' 
-        });
-      }
-      if (target?.includes('firebaseUid')) {
-        // This should be rare with crypto-generated IDs
-        return res.status(500).json({ 
-          success: false, 
-          message: 'Unique ID conflict. Please try again.' 
-        });
-      }
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email already exists' 
+      });
     }
     
     res.status(500).json({ 
@@ -381,7 +397,7 @@ const createManager = async (req, res) => {
   }
 };
 
-// CREATE DRIVER - PRODUCTION VERSION
+// CREATE DRIVER - UPDATED WITH PASSWORD
 const createDriver = async (req, res) => {
   try {
     // Validate input
@@ -403,40 +419,50 @@ const createDriver = async (req, res) => {
       });
     }
 
-    // Generate unique identifier for this driver
+    // Generate temporary password
+    const temporaryPassword = generateRandomPassword(10);
+    const hashedPassword = await bcrypt.hash(temporaryPassword, 10);
+
+    // Generate unique identifier
     const firebaseUid = generateUniqueId('drv');
 
-    // Create driver with transaction for safety
-    const driver = await prisma.$transaction(async (tx) => {
-      return await tx.user.create({
-        data: {
-          name: name.trim(),
-          email: normalizedEmail,
-          phone: phone.trim(),
-          role: 'DELIVERY_AGENT',
-          isActive: true,
-          emailVerified: true,
-          firebaseUid: firebaseUid
-        },
-        select: {
-          id: true,
-          firebaseUid: true,
-          name: true,
-          email: true,
-          phone: true,
-          role: true,
-          isActive: true,
-          createdAt: true
-        }
-      });
+    // Create driver
+    const driver = await prisma.user.create({
+      data: {
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: phone.trim(),
+        role: 'DELIVERY_AGENT',
+        isActive: true,
+        isVerified: true,
+        emailVerified: true,
+        firebaseUid: firebaseUid,
+        // Add this line to set the password in the database
+        password: hashedPassword
+      },
+      select: {
+        id: true,
+        firebaseUid: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        createdAt: true
+      }
     });
 
-    console.log(`✅ Driver created: ${driver.email} (${driver.firebaseUid})`);
+    console.log(`✅ Driver created: ${driver.email}`);
+    console.log(`📋 Temporary password: ${temporaryPassword}`);
 
     res.status(201).json({
       success: true,
       message: 'Driver created successfully',
-      data: driver
+      data: {
+        driver: driver,
+        temporaryPassword: temporaryPassword, // Send this to admin
+        loginInstructions: 'Driver can login with this temporary password and should change it on first login'
+      }
     });
 
   } catch (err) {
@@ -453,19 +479,10 @@ const createDriver = async (req, res) => {
     
     // Handle Prisma errors
     if (err.code === 'P2002') {
-      const target = err.meta?.target;
-      if (target?.includes('email')) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Email already exists' 
-        });
-      }
-      if (target?.includes('firebaseUid')) {
-        return res.status(500).json({ 
-          success: false, 
-          message: 'Unique ID conflict. Please try again.' 
-        });
-      }
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Email already exists' 
+      });
     }
     
     res.status(500).json({ 
@@ -474,6 +491,361 @@ const createDriver = async (req, res) => {
     });
   }
 };
+
+// RESET USER PASSWORD - FIXED
+const resetUserPassword = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Validate input
+    const { newPassword } = resetPasswordSchema.parse(req.body);
+
+    console.log(`🔐 Resetting password for user ID: ${userId}`);
+
+    // Find user
+    const user = await prisma.user.findUnique({
+      where: { 
+        id: userId,
+        OR: [
+          { role: 'MANAGER' },
+          { role: 'DELIVERY_AGENT' }
+        ]
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'User not found or not a manager/driver' 
+      });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update password in database
+    await prisma.user.update({
+      where: { id: userId },
+      data: { 
+        password: hashedPassword,
+        updatedAt: new Date()
+      }
+    });
+
+    console.log(`✅ Password reset for ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        email: user.email,
+        name: user.name,
+        role: user.role
+      }
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Validation error',
+        errors: error.errors 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to reset password' 
+    });
+  }
+};
+
+// DELETE MANAGER - FIXED
+const deleteManager = async (req, res) => {
+  try {
+    const { managerId } = req.params;
+
+    console.log(`🗑️ Attempting to delete manager with ID: ${managerId}`);
+
+    if (!managerId || managerId === 'undefined') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Manager ID is required' 
+      });
+    }
+
+    // Find user by ID and role
+    const user = await prisma.user.findUnique({
+      where: { 
+        id: managerId,
+        role: 'MANAGER'
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Manager not found' 
+      });
+    }
+
+    // Delete from Firebase if has firebaseUid
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().deleteUser(user.firebaseUid);
+        console.log(`✅ Deleted from Firebase: ${user.email}`);
+      } catch (firebaseErr) {
+        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message);
+      }
+    }
+
+    // Delete from database
+    await prisma.user.delete({
+      where: { id: managerId }
+    });
+
+    console.log(`✅ Manager deleted from database: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Manager deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete manager error:', error);
+    
+    if (error.code === 'P2025') {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Manager not found' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to delete manager' 
+    });
+  }
+};
+
+// DELETE DRIVER - FIXED
+const deleteDriver = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+
+    console.log(`🗑️ Attempting to delete driver with ID: ${driverId}`);
+
+    if (!driverId || driverId === 'undefined') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Driver ID is required' 
+      });
+    }
+
+    // Find user by ID and role
+    const user = await prisma.user.findUnique({
+      where: { 
+        id: driverId,
+        role: 'DELIVERY_AGENT'
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Driver not found' 
+      });
+    }
+
+    // Delete from Firebase if has firebaseUid
+    if (user.firebaseUid) {
+      try {
+        await admin.auth().deleteUser(user.firebaseUid);
+        console.log(`✅ Deleted from Firebase: ${user.email}`);
+      } catch (firebaseErr) {
+        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message);
+      }
+    }
+
+    // Delete from database
+    await prisma.user.delete({
+      where: { id: driverId }
+    });
+
+    console.log(`✅ Driver deleted from database: ${user.email}`);
+
+    res.json({
+      success: true,
+      message: 'Driver deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete driver error:', error);
+    
+    if (error.code === 'P2025') {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Driver not found' 
+      });
+    }
+    
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to delete driver' 
+    });
+  }
+};
+
+// ======================== LOGIN ENDPOINTS FOR MANAGERS/DRIVERS ========================
+
+const loginManager = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Find manager
+    const manager = await prisma.user.findUnique({
+      where: { 
+        email: email.trim().toLowerCase(),
+        role: 'MANAGER',
+        isActive: true
+      }
+    });
+
+    if (!manager) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials or account not active' 
+      });
+    }
+
+    // Check if password exists
+    if (!manager.password) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Password not set. Please contact admin.' 
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, manager.password);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials' 
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        userId: manager.id, 
+        email: manager.email, 
+        role: manager.role 
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        user: {
+          id: manager.id,
+          name: manager.name,
+          email: manager.email,
+          role: manager.role,
+          phone: manager.phone
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Manager login error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Login failed' 
+    });
+  }
+};
+
+const loginDriver = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Find driver
+    const driver = await prisma.user.findUnique({
+      where: { 
+        email: email.trim().toLowerCase(),
+        role: 'DELIVERY_AGENT',
+        isActive: true
+      }
+    });
+
+    if (!driver) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials or account not active' 
+      });
+    }
+
+    // Check if password exists
+    if (!driver.password) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Password not set. Please contact admin.' 
+      });
+    }
+
+    // Verify password
+    const isValidPassword = await bcrypt.compare(password, driver.password);
+    
+    if (!isValidPassword) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid credentials' 
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        userId: driver.id, 
+        email: driver.email, 
+        role: driver.role 
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        token,
+        user: {
+          id: driver.id,
+          name: driver.name,
+          email: driver.email,
+          role: driver.role,
+          phone: driver.phone
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Driver login error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Login failed' 
+    });
+  }
+};
+
 // ======================== DEBUG CLOUDINARY CONFIG ========================
 const testCloudinaryConfig = async (req, res) => {
   try {
@@ -506,175 +878,45 @@ const testCloudinaryConfig = async (req, res) => {
   }
 };
 
-
-const resetUserPassword = async (req, res) => {
+// ======================== GET USER DETAILS ========================
+const getUserDetails = async (req, res) => {
   try {
-    const { userId } = req.params
-    const { newPassword } = req.body
+    const { userId } = req.params;
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Password must be at least 6 characters' 
-      })
-    }
-
-    // Find user
     const user = await prisma.user.findUnique({
-      where: { id: userId }
-    })
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        role: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
 
     if (!user) {
       return res.status(404).json({ 
         success: false, 
         message: 'User not found' 
-      })
-    }
-
-    // Hash password using crypto (built-in Node.js)
-    const salt = crypto.randomBytes(16).toString('hex')
-    const hash = crypto.pbkdf2Sync(newPassword, salt, 1000, 64, 'sha512').toString('hex')
-    const hashedPassword = `${salt}:${hash}`
-
-    // Update database
-    await prisma.user.update({
-      where: { id: userId },
-      data: { password: hashedPassword }
-    })
-
-    // Try to update Firebase if user has firebaseUid
-    if (user.firebaseUid) {
-      try {
-        const admin = require('../config/firebase')
-        await admin.auth().updateUser(user.firebaseUid, {
-          password: newPassword
-        })
-        console.log(`✅ Firebase password updated for ${user.email}`)
-      } catch (firebaseErr) {
-        console.log(`⚠️ Firebase update skipped:`, firebaseErr.message)
-      }
+      });
     }
 
     res.json({
       success: true,
-      message: 'Password reset successfully',
-      data: {
-        email: user.email,
-        newPassword: newPassword
-      }
-    })
+      data: user
+    });
 
   } catch (error) {
-    console.error('Reset password error:', error)
+    console.error('Get user details error:', error);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to reset password' 
-    })
+      message: error.message || 'Failed to fetch user details' 
+    });
   }
-}
-const deleteManager = async (req, res) => {
-  try {
-    const { managerId } = req.params
-
-    const user = await prisma.user.findUnique({
-      where: { id: managerId }
-    })
-
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Manager not found' 
-      })
-    }
-
-    if (user.role !== 'MANAGER') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'User is not a manager' 
-      })
-    }
-
-    // Delete from Firebase if has firebaseUid
-    if (user.firebaseUid) {
-      try {
-        await admin.auth().deleteUser(user.firebaseUid)
-        console.log(`✅ Deleted from Firebase: ${user.email}`)
-      } catch (firebaseErr) {
-        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message)
-      }
-    }
-
-    // Delete from database (this is the important part)
-    await prisma.user.delete({
-      where: { id: managerId }
-    })
-
-    res.json({
-      success: true,
-      message: 'Manager deleted successfully'
-    })
-
-  } catch (error) {
-    console.error('Delete manager error:', error)
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete manager' 
-    })
-  }
-}
-
-const deleteDriver = async (req, res) => {
-  try {
-    const { driverId } = req.params
-
-    const user = await prisma.user.findUnique({
-      where: { id: driverId }
-    })
-
-    if (!user) {
-      return res.status(404).json({ 
-        success: false, 
-        message: 'Driver not found' 
-      })
-    }
-
-    if (user.role !== 'DELIVERY_AGENT') {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'User is not a driver' 
-      })
-    }
-
-    // Delete from Firebase if has firebaseUid
-    if (user.firebaseUid) {
-      try {
-        await admin.auth().deleteUser(user.firebaseUid)
-        console.log(`✅ Deleted from Firebase: ${user.email}`)
-      } catch (firebaseErr) {
-        console.log(`⚠️ Firebase delete skipped for ${user.email}:`, firebaseErr.message)
-      }
-    }
-
-    // Delete from database
-    await prisma.user.delete({
-      where: { id: driverId }
-    })
-
-    res.json({
-      success: true,
-      message: 'Driver deleted successfully'
-    })
-
-  } catch (error) {
-    console.error('Delete driver error:', error)
-    res.status(500).json({ 
-      success: false, 
-      message: 'Failed to delete driver' 
-    })
-  }
-}
-
-
+};
 
 // ======================== EXPORT ========================
 module.exports = {
@@ -690,5 +932,8 @@ module.exports = {
   testCloudinaryConfig,
   resetUserPassword,
   deleteManager,
-  deleteDriver
+  deleteDriver,
+  loginManager,
+  loginDriver,
+  getUserDetails
 };

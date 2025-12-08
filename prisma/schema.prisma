@@ -60,13 +60,13 @@ model User {
   updatedAt     DateTime  @updatedAt
   name          String
   email         String    @unique
+  password      String?
   role          Role      @default(CLIENT)
   phone         String?
   isActive      Boolean   @default(true)
   isVerified    Boolean   @default(false)
   firebaseUid   String?   
   avatar        String?
-
   emailVerified Boolean   @default(false)
 
   addresses           Address[]
@@ -175,7 +175,7 @@ model QuoteItem {
   quote     Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
   quoteId   String   @db.ObjectId
   product   Product? @relation(fields: [productId], references: [id])  
-  productId String?  @db.ObjectId                                       
+  productId String?  @db.ObjectId                                        
   quantity  Int
   unitPrice Float
   subtotal  Float
