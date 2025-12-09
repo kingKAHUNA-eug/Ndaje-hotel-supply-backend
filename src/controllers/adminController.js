@@ -104,7 +104,124 @@ const uploadProductImage = async (req, res) => {
     });
   }
 };
+const cleanupOrphanedQuotes = async (req, res) => {
+  try {
+    // Only admins can run this
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required'
+      });
+    }
 
+    console.log('🔍 Starting orphaned quotes cleanup...');
+    
+    // Find all quotes
+    const allQuotes = await prisma.quote.findMany({
+      include: { 
+        client: true,
+        items: true 
+      }
+    });
+
+    console.log(`Total quotes in database: ${allQuotes.length}`);
+
+    // Find orphaned quotes (client is null or doesn't exist)
+    const orphanedQuoteIds = allQuotes
+      .filter(q => q.client === null || !q.client)
+      .map(q => q.id);
+
+    console.log(`Found ${orphanedQuoteIds.length} orphaned quotes`);
+
+    if (orphanedQuoteIds.length === 0) {
+      return res.json({
+        success: true,
+        message: '✅ No orphaned quotes found',
+        data: { cleaned: 0, total: allQuotes.length }
+      });
+    }
+
+    // First, delete quote items for orphaned quotes
+    console.log('Deleting quote items...');
+    await prisma.quoteItem.deleteMany({
+      where: {
+        quoteId: { in: orphanedQuoteIds }
+      }
+    });
+
+    // Then delete the orphaned quotes
+    console.log('Deleting orphaned quotes...');
+    const deleteResult = await prisma.quote.deleteMany({
+      where: {
+        id: { in: orphanedQuoteIds }
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `✅ Cleaned up ${deleteResult.count} orphaned quotes`,
+      data: { 
+        cleaned: deleteResult.count, 
+        total: allQuotes.length,
+        orphanedQuoteIds 
+      }
+    });
+
+  } catch (error) {
+    console.error('Cleanup error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to cleanup orphaned quotes',
+      error: error.message
+    });
+  }
+};
+
+// Also add a function to view orphaned quotes without deleting
+const viewOrphanedQuotes = async (req, res) => {
+  try {
+    // Only admins can run this
+    if (req.user.role !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required'
+      });
+    }
+
+    console.log('🔍 Viewing orphaned quotes...');
+    
+    // Find all quotes with null clients
+    const orphanedQuotes = await prisma.quote.findMany({
+      where: {
+        client: null
+      },
+      include: {
+        items: {
+          include: {
+            product: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    res.json({
+      success: true,
+      message: `Found ${orphanedQuotes.length} orphaned quotes`,
+      data: { orphanedQuotes }
+    });
+
+  } catch (error) {
+    console.error('View orphaned quotes error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to view orphaned quotes',
+      error: error.message
+    });
+  }
+};
 // ======================== REPORTS ========================
 const generateSystemReport = async (req, res) => {
   try {
@@ -935,5 +1052,7 @@ module.exports = {
   deleteDriver,
   loginManager,
   loginDriver,
-  getUserDetails
+  getUserDetails,
+  cleanupOrphanedQuotes,
+  viewOrphanedQuotes
 };

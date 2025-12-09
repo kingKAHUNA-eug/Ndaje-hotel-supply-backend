@@ -17,7 +17,9 @@ const {
   // NEW: IMPORT THESE FROM CONTROLLER
   resetUserPassword,
   deleteManager,
-  deleteDriver
+  deleteDriver,
+  cleanupOrphanedQuotes,
+  viewOrphanedQuotes
 } = require('../controllers/adminController');
 
 // Configure multer for memory storage
@@ -47,6 +49,9 @@ router.post('/create-manager', createManager);
 router.post('/create-driver', createDriver);
 
 router.post('/upload/product-image', upload.single('image'), uploadProductImage);
+
+router.get('/quotes/orphaned', viewOrphanedQuotes);
+router.post('/quotes/cleanup', cleanupOrphanedQuotes);
 
 router.get('/dashboard/summary', getDashboardSummary);
 router.get('/reports/system', generateSystemReport);

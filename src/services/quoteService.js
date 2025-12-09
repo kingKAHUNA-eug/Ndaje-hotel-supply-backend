@@ -710,55 +710,73 @@ class QuoteService {
   /**
    * Get manager quotes
    */
-  static async getManagerQuotes(managerId, status = null) {
-    try {
-      const whereClause = {
-        OR: [
-          { managerId },
-          { status: 'PENDING_PRICING' },
-          { status: 'IN_PRICING', lockedById: managerId }
-        ]
-      };
+  // services/quoteService.js - Update getManagerQuotes function
+static async getManagerQuotes(managerId, status = null) {
+  try {
+    const whereClause = {
+      // Managers should see all quotes that are not completed
+      OR: [
+        { status: 'PENDING_PRICING' },
+        { status: 'IN_PRICING' },
+        { status: 'AWAITING_CLIENT_APPROVAL' }
+      ]
+    };
 
-      if (status) {
-        whereClause.status = status;
-      }
+    if (status) {
+      whereClause.status = status;
+    }
 
-      const quotes = await prisma.quote.findMany({
-        where: whereClause,
-        include: {
-          items: {
-            include: {
-              product: {
-                select: {
-                  id: true,
-                  name: true,
-                  sku: true,
-                  description: true,
-                  category: true
-                }
-              }
-            }
-          },
-          client: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              phone: true
-            }
+    const quotes = await prisma.quote.findMany({
+      where: whereClause,
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
           }
         },
-        orderBy: { createdAt: 'desc' }
-      });
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
 
-      return quotes;
-    } catch (error) {
-      console.error('QuoteService.getManagerQuotes error:', error);
-      throw error;
-    }
+    // ✅ FIX: Filter out quotes with null clients and handle missing data gracefully
+    const validQuotes = quotes.map(quote => ({
+      ...quote,
+      client: quote.client || { 
+        id: 'unknown', 
+        name: 'Unknown Client', 
+        email: null, 
+        phone: null 
+      }
+    }));
+
+    console.log(`✅ Manager quotes retrieved: ${validQuotes.length} quotes`);
+
+    return validQuotes;
+
+  } catch (error) {
+    console.error('QuoteService.getManagerQuotes error:', error);
+    throw new Error('Failed to retrieve manager quotes');
   }
-
+}
   /**
    * Get client quotes
    */
