@@ -26,7 +26,7 @@ const productRoutes = require('./routes/product');
 const orderRoutes = require('./routes/order');
 const paymentRoutes = require('./routes/payment');
 const adminRoutes = require('./routes/admin');
-const quoteRoutes = require('./routes/quote');
+const quoteRoutes = require('./routes/quotes');
 const deliveryRoutes = require('./routes/delivery');
 
 const app = express();
