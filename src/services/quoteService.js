@@ -707,14 +707,13 @@ class QuoteService {
     }
   }
 
-  /**
-   * Get manager quotes
-   */
-  // services/quoteService.js - Update getManagerQuotes function
+ // services/quoteService.js - Updated getManagerQuotes function
 static async getManagerQuotes(managerId, status = null) {
   try {
+    console.log(`📊 Fetching quotes for manager: ${managerId}`);
+    
+    // Use a different approach that won't break with null clients
     const whereClause = {
-      // Managers should see all quotes that are not completed
       OR: [
         { status: 'PENDING_PRICING' },
         { status: 'IN_PRICING' },
@@ -726,17 +725,10 @@ static async getManagerQuotes(managerId, status = null) {
       whereClause.status = status;
     }
 
+    // First, get quotes without the client relation to avoid the error
     const quotes = await prisma.quote.findMany({
       where: whereClause,
       include: {
-        client: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true
-          }
-        },
         items: {
           include: {
             product: {
@@ -757,24 +749,58 @@ static async getManagerQuotes(managerId, status = null) {
       }
     });
 
-    // ✅ FIX: Filter out quotes with null clients and handle missing data gracefully
-    const validQuotes = quotes.map(quote => ({
-      ...quote,
-      client: quote.client || { 
-        id: 'unknown', 
-        name: 'Unknown Client', 
-        email: null, 
-        phone: null 
-      }
-    }));
+    console.log(`📊 Found ${quotes.length} quotes`);
+    
+    // Now get client info separately for each quote
+    const quotesWithClients = await Promise.all(
+      quotes.map(async (quote) => {
+        try {
+          // Try to get the client if clientId exists
+          let client = null;
+          if (quote.clientId) {
+            client = await prisma.user.findUnique({
+              where: { id: quote.clientId },
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true
+              }
+            }).catch(() => null); // If client doesn't exist, return null
+          }
+          
+          return {
+            ...quote,
+            client: client || {
+              id: 'unknown',
+              name: 'Unknown Client',
+              email: null,
+              phone: null
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching client for quote ${quote.id}:`, error);
+          return {
+            ...quote,
+            client: {
+              id: 'unknown',
+              name: 'Unknown Client',
+              email: null,
+              phone: null
+            }
+          };
+        }
+      })
+    );
 
-    console.log(`✅ Manager quotes retrieved: ${validQuotes.length} quotes`);
-
-    return validQuotes;
+    console.log(`✅ Manager quotes retrieved: ${quotesWithClients.length} quotes`);
+    return quotesWithClients;
 
   } catch (error) {
     console.error('QuoteService.getManagerQuotes error:', error);
-    throw new Error('Failed to retrieve manager quotes');
+    
+    // Return empty array instead of throwing error
+    return [];
   }
 }
   /**
