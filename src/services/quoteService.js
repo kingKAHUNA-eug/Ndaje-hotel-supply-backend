@@ -665,12 +665,17 @@ class QuoteService {
    */
  static async getAvailableQuotes(managerId) {
   try {
-    console.log(`🔓 [getAvailableQuotes] Fetching ALL pending quotes for manager: ${managerId}`);
+    console.log(`🔓 [getAvailableQuotes] Fetching quotes for manager: ${managerId}`);
     
-    // Get ALL pending pricing quotes - but handle null client
+    // Get ALL quotes that manager should see
     const quotes = await prisma.quote.findMany({
       where: {
-        status: 'PENDING_PRICING'
+        // Quotes in these statuses are visible to managers
+        OR: [
+          { status: 'PENDING_PRICING' }, // Available for locking
+          { status: 'IN_PRICING' }, // Currently being priced (locked)
+          { status: 'AWAITING_CLIENT_APPROVAL' } // Waiting for client response
+        ]
       },
       include: {
         items: {
@@ -686,60 +691,191 @@ class QuoteService {
             }
           }
         }
-        // REMOVED client include for now to avoid error
       },
       orderBy: { createdAt: 'desc' }
     });
 
-    console.log(`🔓 [getAvailableQuotes] Found ${quotes.length} PENDING_PRICING quotes total`);
+    console.log(`🔓 [getAvailableQuotes] Found ${quotes.length} quotes total`);
     
-    // Now manually get client info, handling null cases
-    const quotesWithClients = await Promise.all(
+    // Add client info and lock status
+    const quotesWithInfo = await Promise.all(
       quotes.map(async (quote) => {
         try {
           let client = null;
           if (quote.clientId) {
             client = await prisma.user.findUnique({
               where: { id: quote.clientId },
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                phone: true
-              }
+              select: { id: true, name: true, email: true, phone: true }
             }).catch(() => null);
           }
           
+          const isLockedByMe = quote.lockedById === managerId;
+          const isLockExpired = quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt);
+          
           return {
             ...quote,
-            client: client || {
-              id: 'unknown',
-              name: 'Unknown Client',
-              email: null,
-              phone: null
+            client: client || { id: 'unknown', name: 'Unknown Client' },
+            lockInfo: {
+              isLocked: !!quote.lockedById,
+              isLockedByMe,
+              isLockExpired,
+              lockedAt: quote.lockedAt,
+              lockExpiresAt: quote.lockExpiresAt,
+              canTakeOver: !quote.lockedById || isLockedByMe || isLockExpired
             }
           };
         } catch (error) {
-          console.error(`Error fetching client for quote ${quote.id}:`, error);
+          console.error(`Error processing quote ${quote.id}:`, error);
           return {
             ...quote,
-            client: {
-              id: 'unknown',
-              name: 'Unknown Client',
-              email: null,
-              phone: null
+            client: { id: 'unknown', name: 'Unknown Client' },
+            lockInfo: {
+              isLocked: !!quote.lockedById,
+              isLockedByMe: quote.lockedById === managerId,
+              isLockExpired: quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt),
+              lockedAt: quote.lockedAt,
+              lockExpiresAt: quote.lockExpiresAt,
+              canTakeOver: !quote.lockedById || quote.lockedById === managerId || 
+                         (quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt))
             }
           };
         }
       })
     );
     
-    return quotesWithClients;
+    // Debug output
+    const pending = quotesWithInfo.filter(q => q.status === 'PENDING_PRICING');
+    const inPricing = quotesWithInfo.filter(q => q.status === 'IN_PRICING');
+    const awaitingApproval = quotesWithInfo.filter(q => q.status === 'AWAITING_CLIENT_APPROVAL');
+    
+    console.log(`📊 Breakdown: ${pending.length} pending, ${inPricing.length} in pricing, ${awaitingApproval.length} awaiting approval`);
+    console.log(`🔒 Locked by me: ${inPricing.filter(q => q.lockedById === managerId).length}`);
+    
+    return quotesWithInfo;
   } catch (error) {
     console.error('QuoteService.getAvailableQuotes error:', error);
     throw error;
   }
 }
+
+/**
+ * Get quotes available for locking (PENDING_PRICING only)
+ */
+static async getQuotesForLocking(managerId) {
+  try {
+    console.log(`🔓 [getQuotesForLocking] for manager: ${managerId}`);
+    
+    const quotes = await prisma.quote.findMany({
+      where: {
+        status: 'PENDING_PRICING',
+        OR: [
+          { lockedById: null },
+          { lockedById: managerId },
+          { lockExpiresAt: { lt: new Date() } }
+        ]
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    console.log(`🔓 Found ${quotes.length} quotes for locking`);
+    return quotes;
+  } catch (error) {
+    console.error('QuoteService.getQuotesForLocking error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get quotes locked by current manager
+ */
+static async getMyLockedQuotes(managerId) {
+  try {
+    console.log(`🔒 [getMyLockedQuotes] for manager: ${managerId}`);
+    
+    const quotes = await prisma.quote.findMany({
+      where: {
+        status: 'IN_PRICING',
+        lockedById: managerId
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { lockedAt: 'desc' }
+    });
+    
+    console.log(`🔒 Found ${quotes.length} quotes locked by manager`);
+    return quotes;
+  } catch (error) {
+    console.error('QuoteService.getMyLockedQuotes error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get quotes awaiting client approval
+ */
+static async getQuotesAwaitingApproval(managerId) {
+  try {
+    console.log(`⏳ [getQuotesAwaitingApproval] for manager: ${managerId}`);
+    
+    const quotes = await prisma.quote.findMany({
+      where: {
+        status: 'AWAITING_CLIENT_APPROVAL',
+        managerId: managerId
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    console.log(`⏳ Found ${quotes.length} quotes awaiting approval`);
+    return quotes;
+  } catch (error) {
+    console.error('QuoteService.getQuotesAwaitingApproval error:', error);
+    throw error;
+  }
+}
+
 static async getManagerQuotes(managerId, status = null) {
   try {
     console.log(`📊 [getManagerQuotes] Fetching for manager: ${managerId}, status: ${status || 'all'}`);

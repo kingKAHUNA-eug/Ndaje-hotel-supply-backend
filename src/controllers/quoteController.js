@@ -341,6 +341,57 @@ const getAvailableQuotes = async (req, res) => {
   }
 };
 
+// Get quotes for locking (PENDING_PRICING only)
+const getQuotesForLocking = async (req, res) => {
+  try {
+    const managerId = req.user.userId;
+    const quotes = await QuoteService.getQuotesForLocking(managerId);
+    
+    res.json({
+      success: true,
+      message: 'Quotes available for locking',
+      data: quotes
+    });
+  } catch (error) {
+    console.error('Error in getQuotesForLocking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get quotes locked by current manager (IN_PRICING and locked by me)
+const getMyLockedQuotes = async (req, res) => {
+  try {
+    const managerId = req.user.userId;
+    const quotes = await QuoteService.getMyLockedQuotes(managerId);
+    
+    res.json({
+      success: true,
+      message: 'Quotes locked by you',
+      data: quotes
+    });
+  } catch (error) {
+    console.error('Error in getMyLockedQuotes:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Get quotes awaiting client approval (AWAITING_CLIENT_APPROVAL and assigned to me)
+const getQuotesAwaitingApproval = async (req, res) => {
+  try {
+    const managerId = req.user.userId;
+    const quotes = await QuoteService.getQuotesAwaitingApproval(managerId);
+    
+    res.json({
+      success: true,
+      message: 'Quotes awaiting client approval',
+      data: quotes
+    });
+  } catch (error) {
+    console.error('Error in getQuotesAwaitingApproval:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createEmptyQuote,
   addQuoteItems,
@@ -356,6 +407,9 @@ module.exports = {
   releaseQuoteLock,  
   checkQuoteLockStatus,    
   getAvailableQuotes,
-  getLockedQuotes
+  getLockedQuotes,
+  getQuotesForLocking,
+  getMyLockedQuotes,
+  getQuotesAwaitingApproval
   
 };
