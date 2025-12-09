@@ -392,6 +392,61 @@ const getQuotesAwaitingApproval = async (req, res) => {
   }
 };
 
+// Temporary debug endpoint
+const debugDatabase = async (req, res) => {
+  try {
+    const quotes = await prisma.quote.findMany({
+      where: {
+        OR: [
+          { status: 'PENDING_PRICING' },
+          { status: 'IN_PRICING' },
+          { status: 'AWAITING_CLIENT_APPROVAL' }
+        ]
+      },
+      select: {
+        id: true,
+        status: true,
+        lockedById: true,
+        managerId: true,
+        lockExpiresAt: true,
+        clientId: true,
+        createdAt: true,
+        totalAmount: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    // Get manager names
+    const quotesWithDetails = await Promise.all(
+      quotes.map(async (quote) => {
+        let lockedByName = null;
+        if (quote.lockedById) {
+          const lockedBy = await prisma.user.findUnique({
+            where: { id: quote.lockedById },
+            select: { name: true }
+          }).catch(() => null);
+          lockedByName = lockedBy?.name;
+        }
+        
+        return {
+          ...quote,
+          lockedByName,
+          isLockExpired: quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt)
+        };
+      })
+    );
+    
+    res.json({ 
+      success: true, 
+      count: quotesWithDetails.length, 
+      quotes: quotesWithDetails 
+    });
+  } catch (error) {
+    console.error('Debug database error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   createEmptyQuote,
   addQuoteItems,
@@ -410,6 +465,6 @@ module.exports = {
   getLockedQuotes,
   getQuotesForLocking,
   getMyLockedQuotes,
-  getQuotesAwaitingApproval
-  
+  getQuotesAwaitingApproval,
+  debugDatabase 
 };

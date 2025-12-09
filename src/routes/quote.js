@@ -15,15 +15,16 @@ const {
   rejectQuote,
   convertQuoteToOrder,
   getQuoteById,
-  //getManagerQuotes, // Remove if not working
+  getManagerQuotes, // Keep this imported
   getClientQuotes,
   lockQuoteForPricing,
   releaseQuoteLock,
   checkQuoteLockStatus,
   getAvailableQuotes,
-  getQuotesForLocking,      // NEW
-  getMyLockedQuotes,        // NEW
-  getQuotesAwaitingApproval // NEW
+  getQuotesForLocking,
+  getMyLockedQuotes,
+  getQuotesAwaitingApproval,
+  debugDatabase
 } = require('../controllers/quoteController');
 
 // All routes require authentication
@@ -37,11 +38,15 @@ router.put('/:quoteId/approve', requireClient, approveQuote);
 router.put('/:quoteId/reject', requireClient, rejectQuote);
 router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 
-// Manager routes - CLEAR SEPARATION
-router.get('/manager/available', requireManager, getQuotesForLocking);     // PENDING_PRICING
-router.get('/manager/locked', requireManager, getMyLockedQuotes);          // IN_PRICING (locked by me)
-router.get('/manager/awaiting-approval', requireManager, getQuotesAwaitingApproval); // AWAITING_CLIENT_APPROVAL
-router.get('/manager/all', requireManager, getAvailableQuotes);            // All manager quotes (all statuses)
+// Manager routes - KEEP BOTH OLD AND NEW
+router.get('/manager/pending', requireManager, getAvailableQuotes); // KEEP THIS for frontend compatibility
+router.get('/manager/quotes', requireManager, getManagerQuotes); // Keep this too
+
+// New endpoints
+router.get('/manager/available', requireManager, getQuotesForLocking);     // NEW: PENDING_PRICING
+router.get('/manager/locked', requireManager, getMyLockedQuotes);          // NEW: IN_PRICING (locked by me)
+router.get('/manager/awaiting-approval', requireManager, getQuotesAwaitingApproval); // NEW: AWAITING_CLIENT_APPROVAL
+router.get('/debug/db', debugDatabase);
 
 // Lock routes
 router.post('/lock', requireManager, lockQuoteForPricing);
