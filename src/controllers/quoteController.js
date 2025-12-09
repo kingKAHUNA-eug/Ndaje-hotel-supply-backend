@@ -209,7 +209,7 @@ const getManagerQuotes = async (req, res) => {
     res.json({
       success: true,
       message: 'Manager quotes retrieved',
-      data: { quotes }
+      data:  quotes 
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
