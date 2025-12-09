@@ -707,25 +707,91 @@ class QuoteService {
     }
   }
 
- // services/quoteService.js - Updated getManagerQuotes function
-static async getManagerQuotes(managerId, status = null) {
+  
+ static async getManagerQuotes(managerId, status = null) {
   try {
     console.log(`📊 Fetching quotes for manager: ${managerId}`);
     
-    // Use a different approach that won't break with null clients
-    const whereClause = {
+    // Build the WHERE clause to get quotes relevant to this manager
+    let whereClause = {
       OR: [
-        { status: 'PENDING_PRICING' },
-        { status: 'IN_PRICING' },
-        { status: 'AWAITING_CLIENT_APPROVAL' }
+        // Quotes currently locked by this manager (in pricing)
+        { 
+          status: 'IN_PRICING', 
+          lockedById: managerId 
+        },
+        // Quotes assigned to this manager and waiting for client approval
+        { 
+          status: 'AWAITING_CLIENT_APPROVAL', 
+          managerId: managerId 
+        },
+        // Quotes pending pricing that are available for this manager
+        { 
+          status: 'PENDING_PRICING',
+          OR: [
+            { lockedById: null },
+            { lockedById: managerId },
+            { lockExpiresAt: { lt: new Date() } }
+          ]
+        }
       ]
     };
 
+    // If a specific status is requested, filter by it
     if (status) {
-      whereClause.status = status;
+      switch(status) {
+        case 'locked':
+          // Only quotes locked by this manager
+          whereClause = {
+            status: 'IN_PRICING',
+            lockedById: managerId
+          };
+          break;
+        case 'pending_approval':
+          // Only quotes awaiting approval from this manager's clients
+          whereClause = {
+            status: 'AWAITING_CLIENT_APPROVAL',
+            managerId: managerId
+          };
+          break;
+        case 'pending_pricing':
+          // Only quotes available for locking
+          whereClause = {
+            status: 'PENDING_PRICING',
+            OR: [
+              { lockedById: null },
+              { lockedById: managerId },
+              { lockExpiresAt: { lt: new Date() } }
+            ]
+          };
+          break;
+        default:
+          // If status is a specific status string, use it with manager filter
+          if (status === 'IN_PRICING') {
+            whereClause = {
+              status: 'IN_PRICING',
+              lockedById: managerId
+            };
+          } else if (status === 'AWAITING_CLIENT_APPROVAL') {
+            whereClause = {
+              status: 'AWAITING_CLIENT_APPROVAL',
+              managerId: managerId
+            };
+          } else {
+            // Use the status in the OR conditions
+            whereClause = {
+              OR: [
+                { status: status, lockedById: managerId },
+                { status: status, managerId: managerId }
+              ]
+            };
+          }
+      }
     }
 
-    // First, get quotes without the client relation to avoid the error
+    console.log('📊 Where clause:', JSON.stringify(whereClause, null, 2));
+
+    // Get quotes with the filtered where clause
     const quotes = await prisma.quote.findMany({
       where: whereClause,
       include: {
@@ -749,13 +815,12 @@ static async getManagerQuotes(managerId, status = null) {
       }
     });
 
-    console.log(`📊 Found ${quotes.length} quotes`);
+    console.log(`📊 Found ${quotes.length} quotes for manager ${managerId}`);
     
     // Now get client info separately for each quote
     const quotesWithClients = await Promise.all(
       quotes.map(async (quote) => {
         try {
-          // Try to get the client if clientId exists
           let client = null;
           if (quote.clientId) {
             client = await prisma.user.findUnique({
@@ -766,8 +831,12 @@ static async getManagerQuotes(managerId, status = null) {
                 email: true,
                 phone: true
               }
-            }).catch(() => null); // If client doesn't exist, return null
+            }).catch(() => null);
           }
+          
+          // Add lock status information for frontend
+          const isLockedByMe = quote.lockedById === managerId;
+          const isLockExpired = quote.lockExpiresAt && new Date() > quote.lockExpiresAt;
           
           return {
             ...quote,
@@ -776,6 +845,14 @@ static async getManagerQuotes(managerId, status = null) {
               name: 'Unknown Client',
               email: null,
               phone: null
+            },
+            lockInfo: {
+              isLocked: !!quote.lockedById,
+              isLockedByMe,
+              isLockExpired,
+              lockedAt: quote.lockedAt,
+              lockExpiresAt: quote.lockExpiresAt,
+              lockedById: quote.lockedById
             }
           };
         } catch (error) {
@@ -787,19 +864,32 @@ static async getManagerQuotes(managerId, status = null) {
               name: 'Unknown Client',
               email: null,
               phone: null
+            },
+            lockInfo: {
+              isLocked: !!quote.lockedById,
+              isLockedByMe: quote.lockedById === managerId,
+              isLockExpired: quote.lockExpiresAt && new Date() > quote.lockExpiresAt,
+              lockedAt: quote.lockedAt,
+              lockExpiresAt: quote.lockExpiresAt,
+              lockedById: quote.lockedById
             }
           };
         }
       })
     );
 
-    console.log(`✅ Manager quotes retrieved: ${quotesWithClients.length} quotes`);
+    // Debug: Count quotes by status
+    const lockedCount = quotesWithClients.filter(q => q.lockInfo.isLockedByMe && q.status === 'IN_PRICING').length;
+    const approvalCount = quotesWithClients.filter(q => q.status === 'AWAITING_CLIENT_APPROVAL').length;
+    const pendingCount = quotesWithClients.filter(q => q.status === 'PENDING_PRICING').length;
+    
+    console.log(`✅ Manager quotes retrieved: ${quotesWithClients.length} quotes total`);
+    console.log(`📊 Breakdown: ${lockedCount} locked, ${pendingCount} pending pricing, ${approvalCount} awaiting approval`);
+    
     return quotesWithClients;
 
   } catch (error) {
     console.error('QuoteService.getManagerQuotes error:', error);
-    
-    // Return empty array instead of throwing error
     return [];
   }
 }

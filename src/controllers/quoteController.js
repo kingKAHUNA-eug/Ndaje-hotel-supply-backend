@@ -81,6 +81,28 @@ const addQuoteItems = async (req, res) => {
     res.status(statusCode).json({ success: false, message: error.message });
   }
 };
+// NEW: Get manager's locked quotes only
+const getLockedQuotes = async (req, res) => {
+  try {
+    const managerId = req.user.userId;
+    
+    console.log(`🔒 API: Fetching locked quotes for manager: ${managerId}`);
+    
+    // Call getManagerQuotes with 'locked' status
+    const quotes = await QuoteService.getManagerQuotes(managerId, 'locked');
+    
+    console.log(`🔒 API: Found ${quotes.length} locked quotes`);
+    
+    res.json({
+      success: true,
+      message: 'Locked quotes retrieved',
+      data: quotes
+    });
+  } catch (error) {
+    console.error('Error in getLockedQuotes:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 // Manager updates pricing
 const updateQuoteItems = async (req, res) => {
@@ -333,5 +355,6 @@ module.exports = {
   lockQuoteForPricing,    
   releaseQuoteLock,  
   checkQuoteLockStatus,    
-  getAvailableQuotes       
+  getAvailableQuotes,
+  getLockedQuotes 
 };

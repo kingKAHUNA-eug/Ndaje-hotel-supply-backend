@@ -20,7 +20,8 @@ const {
   lockQuoteForPricing,
   releaseQuoteLock,
   checkQuoteLockStatus,
-  getAvailableQuotes
+  getAvailableQuotes,
+  getLockedQuotes  // ADD THIS IMPORT
 } = require('../controllers/quoteController');
 
 // All routes require authentication
@@ -35,9 +36,10 @@ router.put('/:quoteId/reject', requireClient, rejectQuote);
 router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 
 // Manager routes
-router.get('/manager/pending', requireManager, getAvailableQuotes); // This is what the frontend calls
-router.get('/manager/available', requireManager, getAvailableQuotes); // Alternative route
-router.get('/manager/quotes', requireManager, getManagerQuotes); // All manager quotes
+router.get('/manager/pending', requireManager, getAvailableQuotes);
+router.get('/manager/available', requireManager, getAvailableQuotes);
+router.get('/manager/quotes', requireManager, getManagerQuotes);
+router.get('/manager/locked', requireManager, getLockedQuotes); // ADD THIS ROUTE
 router.post('/lock', requireManager, lockQuoteForPricing);
 router.put('/:quoteId/release-lock', requireManager, releaseQuoteLock);
 router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
