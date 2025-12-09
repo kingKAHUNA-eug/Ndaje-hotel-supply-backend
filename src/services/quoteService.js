@@ -667,7 +667,7 @@ class QuoteService {
   try {
     console.log(`🔓 [getAvailableQuotes] Fetching ALL pending quotes for manager: ${managerId}`);
     
-    // Get ALL pending pricing quotes (not filtered by manager)
+    // Get ALL pending pricing quotes - but handle null client
     const quotes = await prisma.quote.findMany({
       where: {
         status: 'PENDING_PRICING'
@@ -685,22 +685,56 @@ class QuoteService {
               }
             }
           }
-        },
-        client: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            phone: true
-          }
         }
+        // REMOVED client include for now to avoid error
       },
       orderBy: { createdAt: 'desc' }
     });
 
     console.log(`🔓 [getAvailableQuotes] Found ${quotes.length} PENDING_PRICING quotes total`);
     
-    return quotes;
+    // Now manually get client info, handling null cases
+    const quotesWithClients = await Promise.all(
+      quotes.map(async (quote) => {
+        try {
+          let client = null;
+          if (quote.clientId) {
+            client = await prisma.user.findUnique({
+              where: { id: quote.clientId },
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                phone: true
+              }
+            }).catch(() => null);
+          }
+          
+          return {
+            ...quote,
+            client: client || {
+              id: 'unknown',
+              name: 'Unknown Client',
+              email: null,
+              phone: null
+            }
+          };
+        } catch (error) {
+          console.error(`Error fetching client for quote ${quote.id}:`, error);
+          return {
+            ...quote,
+            client: {
+              id: 'unknown',
+              name: 'Unknown Client',
+              email: null,
+              phone: null
+            }
+          };
+        }
+      })
+    );
+    
+    return quotesWithClients;
   } catch (error) {
     console.error('QuoteService.getAvailableQuotes error:', error);
     throw error;

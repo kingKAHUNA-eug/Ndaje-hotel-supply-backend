@@ -40,7 +40,7 @@ router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 // Manager routes
 router.get('/manager/pending', requireManager, getAvailableQuotes);
 router.get('/manager/available', requireManager, getAvailableQuotes);
-router.get('/manager/quotes', requireManager, getManagerQuotes);
+router.get('/manager/quotes', getManagerQuotes);
 router.post('/lock', requireManager, lockQuoteForPricing);
 router.put('/:quoteId/release-lock', requireManager, releaseQuoteLock);
 router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
