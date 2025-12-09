@@ -302,7 +302,7 @@ const checkQuoteLockStatus = async (req, res) => {
   }
 };
 
-// NEW: Get available quotes for manager
+// In quoteController.js - update the getAvailableQuotes function:
 const getAvailableQuotes = async (req, res) => {
   try {
     const managerId = req.user.userId;
@@ -312,7 +312,7 @@ const getAvailableQuotes = async (req, res) => {
     res.json({
       success: true,
       message: 'Available quotes retrieved',
-      data: { quotes }
+      data: quotes  // Make sure this is an array, not { quotes: [...] }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -34,17 +34,14 @@ router.put('/:quoteId/approve', requireClient, approveQuote);
 router.put('/:quoteId/reject', requireClient, rejectQuote);
 router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 
-// Manager locking routes
+// Manager routes
+router.get('/manager/pending', requireManager, getAvailableQuotes); // This is what the frontend calls
+router.get('/manager/available', requireManager, getAvailableQuotes); // Alternative route
+router.get('/manager/quotes', requireManager, getManagerQuotes); // All manager quotes
 router.post('/lock', requireManager, lockQuoteForPricing);
 router.put('/:quoteId/release-lock', requireManager, releaseQuoteLock);
 router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
-router.get('/manager/available', requireManager, getAvailableQuotes);
-
-// Manager pricing route (updated)
 router.put('/:quoteId/update-pricing', requireManager, updateQuoteItems);
-
-// Manager quotes route
-router.get('/manager/quotes', requireManager, getManagerQuotes);
 
 // Client quotes route
 router.get('/client/my-quotes', requireClient, getClientQuotes);
