@@ -22,8 +22,8 @@ const {
   checkQuoteLockStatus,
   getAvailableQuotes,
   getLockedQuotes,  // ADD THIS IMPORT
-  testManagerQuotes,
-  debugAllQuotes
+  
+  //debugAllQuotes,    
 } = require('../controllers/quoteController');
 
 // All routes require authentication
@@ -41,13 +41,12 @@ router.post('/:quoteId/convert-to-order', requireClient, convertQuoteToOrder);
 router.get('/manager/pending', requireManager, getAvailableQuotes);
 router.get('/manager/available', requireManager, getAvailableQuotes);
 router.get('/manager/quotes', requireManager, getManagerQuotes);
-router.get('/manager/locked', requireManager, getLockedQuotes); // ADD THIS ROUTE
 router.post('/lock', requireManager, lockQuoteForPricing);
 router.put('/:quoteId/release-lock', requireManager, releaseQuoteLock);
 router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
 router.put('/:quoteId/update-pricing', requireManager, updateQuoteItems);
-router.get('/manager/test', requireManager, testManagerQuotes);
-router.get('/manager/debug', requireManager, debugAllQuotes);
+router.get('/manager/locked', requireManager, getLockedQuotes);
+//router.get('/manager/debug', requireManager, debugAllQuotes);
 // Client quotes route
 router.get('/client/my-quotes', requireClient, getClientQuotes);
 

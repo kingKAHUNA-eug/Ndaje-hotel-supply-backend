@@ -81,14 +81,14 @@ const addQuoteItems = async (req, res) => {
     res.status(statusCode).json({ success: false, message: error.message });
   }
 };
-// NEW: Get manager's locked quotes only
+// Add this function to your quoteController.js
 const getLockedQuotes = async (req, res) => {
   try {
     const managerId = req.user.userId;
     
     console.log(`🔒 API: Fetching locked quotes for manager: ${managerId}`);
     
-    // Call getManagerQuotes with 'locked' status
+    // Use getManagerQuotes with 'locked' status filter
     const quotes = await QuoteService.getManagerQuotes(managerId, 'locked');
     
     console.log(`🔒 API: Found ${quotes.length} locked quotes`);
@@ -100,86 +100,6 @@ const getLockedQuotes = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getLockedQuotes:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// DEBUG: Test if manager quotes endpoint works
-const testManagerQuotes = async (req, res) => {
-  try {
-    const managerId = req.user.userId;
-    console.log(`🛠️ Testing manager quotes endpoint for manager: ${managerId}`);
-    
-    // Call the service function directly
-    const quotes = await QuoteService.getAvailableQuotes(managerId);
-    
-    res.json({
-      success: true,
-      message: 'Test endpoint working',
-      endpoint: '/api/quotes/manager/pending',
-      count: quotes.length,
-      data: quotes,
-      stats: {
-        locked: quotes.filter(q => q.status === 'IN_PRICING' && q.lockedById === managerId).length,
-        pending: quotes.filter(q => q.status === 'PENDING_PRICING').length,
-        awaiting_approval: quotes.filter(q => q.status === 'AWAITING_CLIENT_APPROVAL').length
-      }
-    });
-  } catch (error) {
-    console.error('Test endpoint error:', error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-// DEBUG: Check all quotes in database
-const debugAllQuotes = async (req, res) => {
-  try {
-    const quotes = await prisma.quote.findMany({
-      where: {
-        OR: [
-          { status: 'PENDING_PRICING' },
-          { status: 'IN_PRICING' },
-          { status: 'AWAITING_CLIENT_APPROVAL' }
-        ]
-      },
-      select: {
-        id: true,
-        status: true,
-        lockedById: true,
-        managerId: true,
-        lockExpiresAt: true,
-        clientId: true,
-        createdAt: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-    
-    // Get manager name for lockedById
-    const quotesWithDetails = await Promise.all(
-      quotes.map(async (quote) => {
-        let lockedBy = null;
-        if (quote.lockedById) {
-          lockedBy = await prisma.user.findUnique({
-            where: { id: quote.lockedById },
-            select: { name: true, email: true }
-          });
-        }
-        
-        return {
-          ...quote,
-          lockedBy: lockedBy?.name || 'Unknown',
-          isLockExpired: quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt)
-        };
-      })
-    );
-    
-    res.json({
-      success: true,
-      message: 'Debug: All quotes in database',
-      count: quotesWithDetails.length,
-      data: quotesWithDetails
-    });
-  } catch (error) {
-    console.error('Debug error:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -436,6 +356,6 @@ module.exports = {
   releaseQuoteLock,  
   checkQuoteLockStatus,    
   getAvailableQuotes,
-  getLockedQuotes,
-  debugAllQuotes
+  getLockedQuotes
+  
 };
