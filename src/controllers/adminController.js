@@ -1,12 +1,14 @@
 // controllers/adminController.js
 const { z } = require('zod');
 const AdminReportService = require('../services/adminReportService');
+const QuoteService = require('../services/quoteService');
 const crypto = require('crypto'); 
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const admin = require('firebase-admin');
 const { prisma } = require('../index');
+
 
 // Configure Cloudinary
 if (process.env.CLOUDINARY_URL) {
@@ -1034,6 +1036,147 @@ const getUserDetails = async (req, res) => {
     });
   }
 };
+ 
+/**
+ * Get all quotes for admin
+ */
+const getAllQuotes = async (req, res) => {
+  try {
+    const { status, search, startDate, endDate } = req.query;
+    
+    const filters = {};
+    if (status) filters.status = status;
+    if (search) filters.search = search;
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+    
+    const quotes = await QuoteService.getAllQuotes(filters);
+    
+    res.json({
+      success: true,
+      data: quotes,
+      count: quotes.length
+    });
+  } catch (error) {
+    console.error('Get all quotes error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch quotes'
+    });
+  }
+};
+
+/**
+ * Get pending quotes for admin
+ */
+const getPendingQuotes = async (req, res) => {
+  try {
+    const quotes = await QuoteService.getAllPendingQuotes();
+    
+    res.json({
+      success: true,
+      data: quotes,
+      count: quotes.length
+    });
+  } catch (error) {
+    console.error('Get pending quotes error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch pending quotes'
+    });
+  }
+};
+
+/**
+ * Admin delete quote
+ */
+const deleteQuote = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+    
+    if (!quoteId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quote ID is required'
+      });
+    }
+    
+    await QuoteService.deleteQuoteByAdmin(quoteId);
+    
+    res.json({
+      success: true,
+      message: 'Quote deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete quote error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to delete quote'
+    });
+  }
+};
+
+/**
+ * Get quote statistics for dashboard
+ */
+const getQuoteStatistics = async (req, res) => {
+  try {
+    // Get quotes by status
+    const quotes = await prisma.quote.groupBy({
+      by: ['status'],
+      _count: {
+        id: true
+      },
+      _sum: {
+        totalAmount: true
+      }
+    });
+    
+    // Get daily quotes for last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const dailyQuotes = await prisma.quote.groupBy({
+      by: ['createdAt'],
+      where: {
+        createdAt: {
+          gte: sevenDaysAgo
+        }
+      },
+      _count: {
+        id: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+    
+    // Format daily quotes
+    const formattedDaily = dailyQuotes.map(q => ({
+      date: q.createdAt.toISOString().split('T')[0],
+      count: q._count.id
+    }));
+    
+    res.json({
+      success: true,
+      data: {
+        byStatus: quotes,
+        daily: formattedDaily,
+        total: {
+          count: quotes.reduce((sum, q) => sum + q._count.id, 0),
+          revenue: quotes.reduce((sum, q) => sum + (q._sum.totalAmount || 0), 0)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get quote statistics error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to fetch quote statistics'
+    });
+  }
+};
+
 
 // ======================== EXPORT ========================
 module.exports = {
@@ -1054,5 +1197,9 @@ module.exports = {
   loginDriver,
   getUserDetails,
   cleanupOrphanedQuotes,
-  viewOrphanedQuotes
+  viewOrphanedQuotes,
+  getAllQuotes,
+  getPendingQuotes,
+  deleteQuote,
+  getQuoteStatistics
 };

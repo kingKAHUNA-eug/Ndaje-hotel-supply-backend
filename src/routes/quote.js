@@ -15,7 +15,7 @@ const {
   rejectQuote,
   convertQuoteToOrder,
   getQuoteById,
-  getManagerQuotes, // Keep this imported
+  getManagerQuotes,
   getClientQuotes,
   lockQuoteForPricing,
   releaseQuoteLock,
@@ -24,7 +24,8 @@ const {
   getQuotesForLocking,
   getMyLockedQuotes,
   getQuotesAwaitingApproval,
-  debugDatabase
+  debugDatabase,
+  deleteQuoteByManager  // Make sure this is imported
 } = require('../controllers/quoteController');
 
 // All routes require authentication
@@ -55,6 +56,9 @@ router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
 
 // Update pricing
 router.put('/:quoteId/update-pricing', requireManager, updateQuoteItems);
+
+// Delete quote (Manager)
+router.delete('/:quoteId/delete', requireManager, deleteQuoteByManager);
 
 // Client quotes route
 router.get('/client/my-quotes', requireClient, getClientQuotes);

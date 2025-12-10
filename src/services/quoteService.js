@@ -1068,6 +1068,243 @@ static async getManagerQuotes(managerId, status = null) {
       throw error;
     }
   }
+  // Add these methods to your existing QuoteService class
+
+/**
+ * Delete quote (Manager only - can delete quotes they locked)
+ */
+static async deleteQuoteByManager(quoteId, managerId) {
+  try {
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId }
+    });
+
+    if (!quote) {
+      throw new Error('Quote not found');
+    }
+
+    // Check if manager has permission (locked by them or is manager of the quote)
+    const hasPermission = quote.lockedById === managerId || 
+                        quote.managerId === managerId ||
+                        quote.status === 'PENDING_PRICING';
+
+    if (!hasPermission) {
+      throw new Error('You do not have permission to delete this quote');
+    }
+
+    // Cannot delete quotes that are already approved or converted
+    if (quote.status === 'APPROVED' || quote.status === 'CONVERTED_TO_ORDER') {
+      throw new Error('Cannot delete approved or converted quotes');
+    }
+
+    // Delete quote items first (foreign key constraint)
+    await prisma.quoteItem.deleteMany({
+      where: { quoteId }
+    });
+
+    // Delete the quote
+    await prisma.quote.delete({
+      where: { id: quoteId }
+    });
+
+    return { success: true, message: 'Quote deleted successfully' };
+  } catch (error) {
+    console.error('QuoteService.deleteQuoteByManager error:', error);
+    throw error;
+  }
 }
+
+/**
+ * Admin: Delete any quote
+ */
+static async deleteQuoteByAdmin(quoteId) {
+  try {
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId }
+    });
+
+    if (!quote) {
+      throw new Error('Quote not found');
+    }
+
+    // Delete quote items first
+    await prisma.quoteItem.deleteMany({
+      where: { quoteId }
+    });
+
+    // Delete the quote
+    await prisma.quote.delete({
+      where: { id: quoteId }
+    });
+
+    return { success: true, message: 'Quote deleted successfully' };
+  } catch (error) {
+    console.error('QuoteService.deleteQuoteByAdmin error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get all pending quotes for admin
+ */
+static async getAllPendingQuotes() {
+  try {
+    const quotes = await prisma.quote.findMany({
+      where: {
+        OR: [
+          { status: 'PENDING_PRICING' },
+          { status: 'IN_PRICING' },
+          { status: 'AWAITING_CLIENT_APPROVAL' }
+        ]
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true
+              }
+            }
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        manager: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        lockedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return quotes;
+  } catch (error) {
+    console.error('QuoteService.getAllPendingQuotes error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Admin: Get all quotes with filters
+ */
+static async getAllQuotes(filters = {}) {
+  try {
+    const { status, startDate, endDate, search } = filters;
+    
+    let whereClause = {};
+    
+    if (status) {
+      whereClause.status = status;
+    }
+    
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) {
+        whereClause.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        whereClause.createdAt.lte = new Date(endDate);
+      }
+    }
+    
+    if (search) {
+      whereClause.OR = [
+        {
+          client: {
+            name: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        },
+        {
+          client: {
+            email: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        },
+        {
+          id: {
+            contains: search,
+            mode: 'insensitive'
+            }
+        }
+      ];
+    }
+
+    const quotes = await prisma.quote.findMany({
+      where: whereClause,
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true
+              }
+            }
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        manager: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        lockedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return quotes;
+  } catch (error) {
+    console.error('QuoteService.getAllQuotes error:', error);
+    throw error;
+  }
+}
+}
+
 
 module.exports = QuoteService;

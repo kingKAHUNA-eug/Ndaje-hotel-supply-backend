@@ -1,5 +1,6 @@
-const { z } = require('zod');  // Make sure this is at the top!
+const { z } = require('zod');
 const QuoteService = require('../services/quoteService');
+const prisma = require('../config/prisma'); // ADD THIS IMPORT
 
 // Validation schemas
 const createEmptyQuoteSchema = z.object({
@@ -31,8 +32,11 @@ const rejectQuoteSchema = z.object({
   reason: z.string().optional()
 });
 
-// Add this new schema for locking
 const lockQuoteSchema = z.object({
+  quoteId: z.string().min(1, 'Quote ID is required')
+});
+
+const deleteQuoteSchema = z.object({
   quoteId: z.string().min(1, 'Quote ID is required')
 });
 
@@ -79,28 +83,6 @@ const addQuoteItems = async (req, res) => {
     }
     
     res.status(statusCode).json({ success: false, message: error.message });
-  }
-};
-// Add this function to your quoteController.js
-const getLockedQuotes = async (req, res) => {
-  try {
-    const managerId = req.user.userId;
-    
-    console.log(`🔒 API: Fetching locked quotes for manager: ${managerId}`);
-    
-    // Use getManagerQuotes with 'locked' status filter
-    const quotes = await QuoteService.getManagerQuotes(managerId, 'locked');
-    
-    console.log(`🔒 API: Found ${quotes.length} locked quotes`);
-    
-    res.json({
-      success: true,
-      message: 'Locked quotes retrieved',
-      data: quotes
-    });
-  } catch (error) {
-    console.error('Error in getLockedQuotes:', error);
-    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -231,7 +213,7 @@ const getManagerQuotes = async (req, res) => {
     res.json({
       success: true,
       message: 'Manager quotes retrieved',
-      data:  quotes 
+      data: quotes 
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -256,7 +238,7 @@ const getClientQuotes = async (req, res) => {
   }
 };
 
-// NEW: Manager locks quote for pricing
+// Manager locks quote for pricing
 const lockQuoteForPricing = async (req, res) => {
   try {
     const { quoteId } = lockQuoteSchema.parse(req.body);
@@ -283,7 +265,7 @@ const lockQuoteForPricing = async (req, res) => {
   }
 };
 
-// NEW: Manager releases quote lock
+// Manager releases quote lock
 const releaseQuoteLock = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -307,7 +289,7 @@ const releaseQuoteLock = async (req, res) => {
   }
 };
 
-// NEW: Check quote lock status
+// Check quote lock status
 const checkQuoteLockStatus = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -324,7 +306,7 @@ const checkQuoteLockStatus = async (req, res) => {
   }
 };
 
-// In quoteController.js - update the getAvailableQuotes function:
+// Get available quotes
 const getAvailableQuotes = async (req, res) => {
   try {
     const managerId = req.user.userId;
@@ -334,7 +316,7 @@ const getAvailableQuotes = async (req, res) => {
     res.json({
       success: true,
       message: 'Available quotes retrieved',
-      data: quotes  // Make sure this is an array, not { quotes: [...] }
+      data: quotes
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -447,6 +429,36 @@ const debugDatabase = async (req, res) => {
   }
 };
 
+// Manager deletes quote they locked
+const deleteQuoteByManager = async (req, res) => {
+  try {
+    const { quoteId } = deleteQuoteSchema.parse(req.params);
+    const managerId = req.user.userId;
+    
+    await QuoteService.deleteQuoteByManager(quoteId, managerId);
+    
+    res.json({
+      success: true,
+      message: 'Quote deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete quote error:', error);
+    let statusCode = 500;
+    if (error.message.includes('not found')) {
+      statusCode = 404;
+    } else if (error.message.includes('permission')) {
+      statusCode = 403;
+    } else if (error.message.includes('Cannot delete')) {
+      statusCode = 400;
+    }
+    
+    res.status(statusCode).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 module.exports = {
   createEmptyQuote,
   addQuoteItems,
@@ -462,9 +474,9 @@ module.exports = {
   releaseQuoteLock,  
   checkQuoteLockStatus,    
   getAvailableQuotes,
-  getLockedQuotes,
   getQuotesForLocking,
   getMyLockedQuotes,
   getQuotesAwaitingApproval,
-  debugDatabase 
+  debugDatabase,
+  deleteQuoteByManager
 };

@@ -1,26 +1,8 @@
-// routes/admin.js — FINAL VERSION — FULL CONTROL ACHIEVED
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { authenticateToken, requireAdmin } = require('../middlewares/auth');
-const {
-  getAllManagers,
-  getAllDrivers,
-  createManager,
-  createDriver,
-  getAllOrders,
-  getDashboardSummary,
-  generateSystemReport,
-  exportReportToCSV,
-  uploadProductImage,
-  testCloudinaryConfig,
-  // NEW: IMPORT THESE FROM CONTROLLER
-  resetUserPassword,
-  deleteManager,
-  deleteDriver,
-  cleanupOrphanedQuotes,
-  viewOrphanedQuotes
-} = require('../controllers/adminController');
+const adminController = require('../controllers/adminController'); // IMPORT THE CONTROLLER
 
 // Configure multer for memory storage
 const upload = multer({ 
@@ -40,26 +22,34 @@ router.use(authenticateToken);
 router.use(requireAdmin);
 
 // ========== EXISTING ROUTES (KEEP THEM) ==========
-router.get('/test-cloudinary', testCloudinaryConfig);
-router.get('/managers', getAllManagers);
-router.get('/drivers', getAllDrivers);
-router.get('/orders', getAllOrders);
+router.get('/test-cloudinary', adminController.testCloudinaryConfig);
+router.get('/managers', adminController.getAllManagers);
+router.get('/drivers', adminController.getAllDrivers);
+router.get('/orders', adminController.getAllOrders);
 
-router.post('/create-manager', createManager);
-router.post('/create-driver', createDriver);
+router.post('/create-manager', adminController.createManager);
+router.post('/create-driver', adminController.createDriver);
 
-router.post('/upload/product-image', upload.single('image'), uploadProductImage);
+router.post('/upload/product-image', upload.single('image'), adminController.uploadProductImage);
 
-router.get('/quotes/orphaned', viewOrphanedQuotes);
-router.post('/quotes/cleanup', cleanupOrphanedQuotes);
+// ========== QUOTE MANAGEMENT ROUTES ==========
+router.get('/quotes', adminController.getAllQuotes);
+router.get('/quotes/pending', adminController.getPendingQuotes);
+router.delete('/quotes/:quoteId', adminController.deleteQuote);
+router.get('/quotes/statistics', adminController.getQuoteStatistics);
 
-router.get('/dashboard/summary', getDashboardSummary);
-router.get('/reports/system', generateSystemReport);
-router.get('/reports/export/csv', exportReportToCSV);
+router.get('/quotes/orphaned', adminController.viewOrphanedQuotes);
+router.post('/quotes/cleanup', adminController.cleanupOrphanedQuotes);
 
-// ========== NEW: TOTAL CONTROL ENDPOINTS ==========
-router.post('/reset-password/:userId', resetUserPassword);     // Reset any user's password
-router.delete('/managers/:id', deleteManager);                 // Delete manager
-router.delete('/drivers/:id', deleteDriver);                   // Delete driver
+// ========== DASHBOARD & REPORTS ==========
+router.get('/dashboard/summary', adminController.getDashboardSummary);
+router.get('/reports/system', adminController.generateSystemReport);
+router.get('/reports/export/csv', adminController.exportReportToCSV);
+
+// ========== USER MANAGEMENT ==========
+router.post('/reset-password/:userId', adminController.resetUserPassword);
+router.delete('/managers/:id', adminController.deleteManager);
+router.delete('/drivers/:id', adminController.deleteDriver);
+router.get('/user/:userId', adminController.getUserDetails);
 
 module.exports = router;
