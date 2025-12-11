@@ -342,8 +342,28 @@ const lockQuote = async (req, res) => {
       }
     });
 
-    // Fetch client data
-    const client = await getClientData(updatedQuote.clientId);
+    // Check if updatedQuote exists before accessing properties - FIX ADDED HERE
+    if (!updatedQuote) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update quote lock status'
+      });
+    }
+
+    // Fetch client data - FIXED: Check if clientId exists
+    let client = null;
+    if (updatedQuote.clientId) {
+      client = await getClientData(updatedQuote.clientId);
+    } else {
+      // Fallback client data if no clientId
+      client = {
+        id: 'unknown',
+        name: 'Unknown Client',
+        email: null,
+        phone: null,
+        hotelName: null
+      };
+    }
     
     console.log(`✅ Quote locked successfully: ${quoteId}`);
     
@@ -352,7 +372,7 @@ const lockQuote = async (req, res) => {
       message: 'Quote locked successfully',
       data: {
         ...updatedQuote,
-        client
+        client // FIXED: Now client will always be defined
       }
     });
   } catch (err) {
@@ -363,7 +383,6 @@ const lockQuote = async (req, res) => {
     });
   }
 };
-
 // Update pricing for a quote (for /api/quotes/manager/:id/update-pricing)
 const updatePricing = async (req, res) => {
   const { id } = req.params;
