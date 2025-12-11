@@ -28,6 +28,7 @@ const paymentRoutes = require('./routes/payment');
 const adminRoutes = require('./routes/admin');
 const quoteRoutes = require('./routes/quote');
 const deliveryRoutes = require('./routes/delivery');
+const managerRoutes = require('./routes/manager');
 
 const app = express();
 setupCronJobs();
@@ -86,11 +87,11 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
-
+app.use('/api/quotes/manager', managerRoutes);
 
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
 app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
-app.use('/api/manager', require('./routes/manager'));
+
 
 // 404
 app.use((req, res) => {
