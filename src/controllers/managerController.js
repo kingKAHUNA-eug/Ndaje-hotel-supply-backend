@@ -504,17 +504,28 @@ const updatePricing = async (req, res) => {
 };
 
 // Delete a quote (for managers)
+// controllers/managerController.js - FIXED deleteQuote function
 const deleteQuote = async (req, res) => {
   try {
     const { id } = req.params;
-    const managerId = req.user.id;
+    const managerId = req.user?.id; // Added optional chaining
     
     console.log(`🗑️ Delete request: quoteId=${id}, managerId=${managerId}`);
     
+    // Validate ID
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quote ID is required'
+      });
+    }
+    
+    // Find the quote
     const quote = await prisma.quote.findUnique({
       where: { id }
     });
     
+    // Check if quote exists
     if (!quote) {
       return res.status(404).json({
         success: false,
@@ -522,48 +533,66 @@ const deleteQuote = async (req, res) => {
       });
     }
     
-    // Allow deletion if:
-    // 1. Manager has locked the quote, OR
-    // 2. Quote is available (PENDING_PRICING with no lock or expired lock), OR
-    // 3. Manager assigned to the quote
-    const isLockExpired = quote.lockExpiresAt && quote.lockExpiresAt < new Date();
+    // Check if manager ID is available
+    if (!managerId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Manager ID not found'
+      });
+    }
+    
+    // Calculate if lock is expired
+    const isLockExpired = quote.lockExpiresAt && new Date(quote.lockExpiresAt) < new Date();
+    
+    // Determine if manager can delete
     const canDelete = 
       (quote.lockedById === managerId && quote.status === 'IN_PRICING') ||
       (quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired)) ||
       (quote.managerId === managerId);
     
+    console.log(`🔍 Delete check: canDelete=${canDelete}, status=${quote.status}, lockedById=${quote.lockedById}, managerId=${managerId}, isLockExpired=${isLockExpired}`);
+    
     if (!canDelete) {
       return res.status(403).json({
         success: false,
-        message: 'You can only delete quotes that you have locked or that are available'
+        message: 'You can only delete quotes that you have locked, that are available, or that are assigned to you'
       });
     }
     
-    // First delete quote items
-    await prisma.quoteItem.deleteMany({
-      where: { quoteId: id }
+    // Start a transaction to ensure both deletions succeed
+    await prisma.$transaction(async (tx) => {
+      // Delete quote items first
+      await tx.quoteItem.deleteMany({
+        where: { quoteId: id }
+      });
+      
+      // Then delete the quote
+      await tx.quote.delete({
+        where: { id }
+      });
     });
     
-    // Then delete the quote
-    await prisma.quote.delete({
-      where: { id }
-    });
+    console.log(`✅ Quote deleted successfully: ${id}`);
     
-    console.log(`✅ Quote deleted: ${id}`);
-    
-    res.json({
+    return res.json({
       success: true,
       message: 'Quote deleted successfully'
     });
+    
   } catch (err) {
     console.error('❌ Delete quote error:', err);
-    res.status(500).json({
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      stack: err.stack
+    });
+    
+    return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to delete quote'
+      message: err.message || 'Failed to delete quote. Please try again.'
     });
   }
 };
-
 // ======================== LEGACY ENDPOINTS (KEEP FOR COMPATIBILITY) ========================
 
 const getPendingQuotes = async (req, res) => {
