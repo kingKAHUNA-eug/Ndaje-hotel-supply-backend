@@ -28,6 +28,31 @@ class NotificationService {
       });
     });
   }
+ static async createNotification(userId, type, title, message, data = {}) {
+    try {
+      await prisma.notification.create({
+        data: {
+          userId,
+          type,
+          title,
+          message,
+          data: JSON.stringify(data),
+          read: false
+        }
+      });
+    } catch (error) {
+      console.error('Failed to create notification:', error);
+    }
+  }
+   static async notifyNewQuote(managerId, quoteId, clientName) {
+    await this.createNotification(
+      managerId,
+      'NEW_QUOTE',
+      'New Quote Available',
+      `New quote from ${clientName} ready for pricing`,
+      { quoteId }
+    );
+  }
 
   // Notify manager when they try to access a locked quote
   async notifyQuoteLocked(managerId, quoteId, lockedByManagerName) {
