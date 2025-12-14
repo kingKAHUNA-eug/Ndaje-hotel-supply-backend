@@ -965,6 +965,367 @@ const loginDriver = async (req, res) => {
   }
 };
 
+const getAdminQuotes = async (req, res) => {
+  try {
+    const { status, startDate, endDate, search } = req.query;
+    
+    let whereClause = {};
+    
+    if (status) {
+      whereClause.status = status;
+    }
+    
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) {
+        whereClause.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        whereClause.createdAt.lte = new Date(endDate);
+      }
+    }
+    
+    if (search) {
+      whereClause.OR = [
+        {
+          client: {
+            name: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        },
+        {
+          client: {
+            email: {
+              contains: search,
+              mode: 'insensitive'
+            }
+          }
+        },
+        {
+          id: {
+            contains: search,
+            mode: 'insensitive'
+          }
+        }
+      ];
+    }
+    
+    const quotes = await prisma.quote.findMany({
+      where: whereClause,
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true
+              }
+            }
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        manager: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        lockedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    // Add lock status information
+    const quotesWithLockStatus = quotes.map(quote => {
+      const isLocked = quote.lockedById !== null;
+      const isLockExpired = quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt);
+      
+      return {
+        ...quote,
+        lockInfo: {
+          isLocked,
+          isLockExpired,
+          lockedAt: quote.lockedAt,
+          lockExpiresAt: quote.lockExpiresAt,
+          canTakeOver: isLocked && isLockExpired
+        }
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: quotesWithLockStatus,
+      count: quotesWithLockStatus.length
+    });
+  } catch (error) {
+    console.error('Get admin quotes error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch quotes'
+    });
+  }
+};
+
+/**
+ * Get quote statistics for admin dashboard
+ */
+const getAdminQuoteStats = async (req, res) => {
+  try {
+    // Get counts by status
+    const statusCounts = await prisma.quote.groupBy({
+      by: ['status'],
+      _count: {
+        id: true
+      }
+    });
+    
+    // Get total revenue from approved quotes
+    const revenueStats = await prisma.quote.aggregate({
+      where: {
+        status: 'APPROVED'
+      },
+      _sum: {
+        totalAmount: true
+      },
+      _count: {
+        id: true
+      }
+    });
+    
+    // Get monthly quotes for the last 6 months
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    
+    const monthlyQuotes = await prisma.quote.groupBy({
+      by: ['createdAt'],
+      where: {
+        createdAt: {
+          gte: sixMonthsAgo
+        }
+      },
+      _count: {
+        id: true
+      },
+      orderBy: {
+        createdAt: 'asc'
+      }
+    });
+    
+    // Format monthly data
+    const formattedMonthly = monthlyQuotes.map(q => ({
+      month: q.createdAt.toISOString().substring(0, 7),
+      count: q._count.id
+    }));
+    
+    // Get quotes by manager
+    const quotesByManager = await prisma.quote.groupBy({
+      by: ['managerId'],
+      where: {
+        managerId: {
+          not: null
+        }
+      },
+      _count: {
+        id: true
+      },
+      _sum: {
+        totalAmount: true
+      }
+    });
+    
+    // Get manager details
+    const managerIds = quotesByManager.map(q => q.managerId);
+    const managers = await prisma.user.findMany({
+      where: {
+        id: { in: managerIds },
+        role: 'MANAGER'
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true
+      }
+    });
+    
+    const managerStats = quotesByManager.map(q => {
+      const manager = managers.find(m => m.id === q.managerId);
+      return {
+        managerId: q.managerId,
+        managerName: manager ? manager.name : 'Unknown',
+        count: q._count.id,
+        totalRevenue: q._sum.totalAmount || 0
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        statusCounts,
+        revenue: {
+          total: revenueStats._sum.totalAmount || 0,
+          average: revenueStats._count.id > 0 ? 
+            (revenueStats._sum.totalAmount || 0) / revenueStats._count.id : 0,
+          count: revenueStats._count.id
+        },
+        monthly: formattedMonthly,
+        byManager: managerStats,
+        totalQuotes: statusCounts.reduce((sum, item) => sum + item._count.id, 0)
+      }
+    });
+  } catch (error) {
+    console.error('Get admin quote stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch quote statistics'
+    });
+  }
+};
+
+/**
+ * Get detailed quote information
+ */
+const getQuoteDetails = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+    
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true,
+                image: true
+              }
+            }
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            hotelName: true
+          }
+        },
+        manager: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        lockedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+    
+    if (!quote) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: quote
+    });
+  } catch (error) {
+    console.error('Get quote details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch quote details'
+    });
+  }
+};
+
+/**
+ * Admin delete quote with warning
+ */
+const adminDeleteQuote = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+    const { confirm } = req.body;
+    
+    if (!confirm) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please confirm deletion by sending confirm: true in the request body'
+      });
+    }
+    
+    console.log(`🗑️ Admin deleting quote: ${quoteId}`);
+    
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId }
+    });
+    
+    if (!quote) {
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found'
+      });
+    }
+    
+    // Delete quote items first
+    await prisma.quoteItem.deleteMany({
+      where: { quoteId }
+    });
+    
+    // Delete the quote
+    await prisma.quote.delete({
+      where: { id: quoteId }
+    });
+    
+    console.log(`✅ Admin deleted quote: ${quoteId}`);
+    
+    res.json({
+      success: true,
+      message: 'Quote deleted successfully'
+    });
+  } catch (error) {
+    console.error('Admin delete quote error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete quote'
+    });
+  }
+};
+
 // ======================== DEBUG CLOUDINARY CONFIG ========================
 const testCloudinaryConfig = async (req, res) => {
   try {
@@ -1201,5 +1562,9 @@ module.exports = {
   getAllQuotes,
   getPendingQuotes,
   deleteQuote,
-  getQuoteStatistics
+  adminDeleteQuote,
+  getQuoteStatistics,
+  getAdminQuotes,
+  getAdminQuoteStats,
+  getQuoteDetails
 };
