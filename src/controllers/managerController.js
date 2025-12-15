@@ -275,7 +275,6 @@ const getAwaitingApprovalQuotes = async (req, res) => {
   }
 };
 
-// Lock quote - COMPLETE FIX
 const lockQuote = async (req, res) => {
   try {
     const { quoteId } = req.body;
@@ -297,8 +296,12 @@ const lockQuote = async (req, res) => {
       });
     }
     
+    // Check if quote exists FIRST
     const existingQuote = await prisma.quote.findUnique({
-      where: { id: quoteId }
+      where: { id: quoteId },
+      include: {
+        items: true // Include items for better logging
+      }
     });
     
     if (!existingQuote) {
@@ -313,14 +316,17 @@ const lockQuote = async (req, res) => {
       id: existingQuote.id,
       status: existingQuote.status,
       lockedById: existingQuote.lockedById,
-      lockExpiresAt: existingQuote.lockExpiresAt
+      lockExpiresAt: existingQuote.lockExpiresAt,
+      itemCount: existingQuote.items?.length || 0
     });
     
+    // Check if already locked
     if (existingQuote.lockedById && existingQuote.lockedById !== managerId) {
-      const lockExpired = existingQuote.lockExpiresAt && existingQuote.lockExpiresAt < new Date();
+      const lockExpired = existingQuote.lockExpiresAt && 
+                         new Date(existingQuote.lockExpiresAt) < new Date();
       
       if (!lockExpired) {
-        console.log(`🔐 Quote ${quoteId} is already locked by another manager`);
+        console.log(`🔐 Quote ${quoteId} is already locked by manager: ${existingQuote.lockedById}`);
         return res.status(409).json({
           success: false,
           message: 'Quote is already locked by another manager'
@@ -329,16 +335,19 @@ const lockQuote = async (req, res) => {
       console.log(`🔄 Quote ${quoteId} lock has expired, can be re-locked`);
     }
     
+    // Set lock expiration (30 minutes from now)
     const lockExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
     
-    console.log(`⏰ Setting lock until: ${lockExpiresAt}`);
+    console.log(`⏰ Setting lock until: ${lockExpiresAt.toISOString()}`);
     
+    // Update the quote with lock
     const updatedQuote = await prisma.quote.update({
       where: { id: quoteId },
       data: {
         lockedById: managerId,
         lockExpiresAt: lockExpiresAt,
-        status: 'IN_PRICING'
+        status: 'IN_PRICING',
+        lockedAt: new Date()
       },
       include: {
         items: {
@@ -358,14 +367,13 @@ const lockQuote = async (req, res) => {
       }
     });
     
-    if (!updatedQuote) {
-      console.log(`❌ Failed to update quote lock status for ${quoteId}`);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to update quote lock status'
-      });
-    }
+    console.log(`✅ Quote locked successfully: ${quoteId}`, {
+      lockedById: updatedQuote.lockedById,
+      status: updatedQuote.status,
+      lockExpiresAt: updatedQuote.lockExpiresAt
+    });
     
+    // Get client data safely
     let client = null;
     if (updatedQuote.clientId) {
       client = await getClientData(updatedQuote.clientId);
@@ -379,8 +387,6 @@ const lockQuote = async (req, res) => {
       };
     }
     
-    console.log(`✅ Quote locked successfully: ${quoteId}`);
-    
     return res.json({
       success: true,
       message: 'Quote locked successfully',
@@ -391,8 +397,8 @@ const lockQuote = async (req, res) => {
     });
     
   } catch (err) {
-    console.error('❌ Lock quote error:', err);
-    console.error('Error stack:', err.stack);
+    console.error('❌ Lock quote error:', err.message);
+    console.error('Error details:', err);
     
     if (err.code === 'P2025') {
       return res.status(404).json({
@@ -407,7 +413,6 @@ const lockQuote = async (req, res) => {
     });
   }
 };
-
 // Update pricing
 const updatePricing = async (req, res) => {
   try {
@@ -767,6 +772,95 @@ const getMyPricedOrders = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch your orders' });
   }
 };
+const getManagerNotifications = async (req, res) => {
+  try {
+    const managerId = req.user.id;
+    
+    console.log(`🔔 [getManagerNotifications] for manager: ${managerId}`);
+    
+    // Get new quotes available for pricing
+    const newQuotes = await prisma.quote.findMany({
+      where: {
+        status: 'PENDING_PRICING',
+        OR: [
+          { lockedById: null },
+          { lockExpiresAt: { lt: new Date() } }
+        ]
+      },
+      select: {
+        id: true,
+        createdAt: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 10
+    });
+    
+    // Get quotes awaiting approval
+    const awaitingApproval = await prisma.quote.findMany({
+      where: {
+        managerId: managerId,
+        status: 'AWAITING_CLIENT_APPROVAL'
+      },
+      select: {
+        id: true,
+        updatedAt: true
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 10
+    });
+    
+    // Get expired locks
+    const expiredLocks = await prisma.quote.findMany({
+      where: {
+        lockedById: managerId,
+        status: 'IN_PRICING',
+        lockExpiresAt: { lt: new Date() }
+      },
+      select: {
+        id: true,
+        lockExpiresAt: true
+      }
+    });
+    
+    const notifications = {
+      newQuotesCount: newQuotes.length,
+      newQuotes: newQuotes.map(q => ({
+        id: q.id,
+        type: 'NEW_QUOTE',
+        message: 'New quote available for pricing',
+        createdAt: q.createdAt
+      })),
+      awaitingApprovalCount: awaitingApproval.length,
+      awaitingApproval: awaitingApproval.map(q => ({
+        id: q.id,
+        type: 'AWAITING_APPROVAL',
+        message: 'Quote awaiting client approval',
+        createdAt: q.updatedAt
+      })),
+      expiredLocksCount: expiredLocks.length,
+      expiredLocks: expiredLocks.map(q => ({
+        id: q.id,
+        type: 'EXPIRED_LOCK',
+        message: 'Your lock on a quote has expired',
+        createdAt: q.lockExpiresAt
+      }))
+    };
+    
+    console.log(`✅ [getManagerNotifications] Returning notifications`);
+    
+    res.json({
+      success: true,
+      data: notifications
+    });
+    
+  } catch (err) {
+    console.error('❌ Get manager notifications error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch notifications'
+    });
+  }
+};
 
 module.exports = {
   getManagerQuotes,
@@ -778,5 +872,6 @@ module.exports = {
   deleteQuote,
   getPendingQuotes,
   priceAndApproveQuote,
-  getMyPricedOrders
+  getMyPricedOrders,
+  getManagerNotifications
 };

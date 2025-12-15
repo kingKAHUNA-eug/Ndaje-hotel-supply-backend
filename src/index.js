@@ -92,6 +92,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/quotes/manager', managerRoutes);
+app.use('/api/manager', managerRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/driver', driverRoutes);
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
