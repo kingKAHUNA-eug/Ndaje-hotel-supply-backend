@@ -101,9 +101,10 @@ const lockQuote = async (req, res) => {
               select: {
                 id: true,
                 name: true,
-                unit: true,
                 price: true,
-                sku: true
+                sku: true,
+                description: true,
+                category: true
               }
             }
           }
