@@ -1,4 +1,5 @@
-// controllers/managerController.js - COMPLETE FIXED VERSION
+
+
 const { prisma } = require('../config/prisma');
 
 // Helper function to safely fetch client data
@@ -10,16 +11,14 @@ const getClientData = async (clientId) => {
         id: true,
         name: true,
         email: true,
-        phone: true,
-        hotelName: true
+        phone: true
       }
     });
     return client || {
       id: clientId,
       name: 'Unknown Client',
       email: null,
-      phone: null,
-      hotelName: null
+      phone: null
     };
   } catch (error) {
     console.error(`Error fetching client ${clientId}:`, error);
@@ -27,31 +26,80 @@ const getClientData = async (clientId) => {
       id: clientId,
       name: 'Unknown Client',
       email: null,
-      phone: null,
-      hotelName: null
+      phone: null
     };
   }
 };
 
-// Get all manager quotes
-const getManagerQuotes = async (req, res) => {
+// Lock quote - FIXED (line 300 error)
+const lockQuote = async (req, res) => {
   try {
-    const managerId = req.user.id;
-
-    console.log(`📊 [getManagerQuotes] Fetching for manager: ${managerId}`);
-
-    const quotes = await prisma.quote.findMany({
-      where: {
-        OR: [
-          { managerId },
-          { lockedById: managerId },
-          { status: 'PENDING_PRICING' },
-          { status: 'IN_PRICING' },
-          {
-            status: 'AWAITING_CLIENT_APPROVAL',
-            managerId: managerId
-          }
-        ]
+    const { quoteId } = req.body;
+    const managerId = req.user?.id;
+    
+    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}`);
+    
+    if (!quoteId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quote ID is required'
+      });
+    }
+    
+    if (!managerId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Manager ID not found'
+      });
+    }
+    
+    // Find the quote
+    const existingQuote = await prisma.quote.findUnique({
+      where: { id: quoteId }
+    });
+    
+    if (!existingQuote) {
+      console.log(`❌ Quote ${quoteId} not found in database`);
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found'
+      });
+    }
+    
+    console.log(`📋 Found quote:`, {
+      id: existingQuote.id,
+      status: existingQuote.status,
+      lockedById: existingQuote.lockedById,
+      lockExpiresAt: existingQuote.lockExpiresAt
+    });
+    
+    // Check if already locked by another manager
+    if (existingQuote.lockedById && existingQuote.lockedById !== managerId) {
+      const lockExpired = existingQuote.lockExpiresAt && existingQuote.lockExpiresAt < new Date();
+      
+      if (!lockExpired) {
+        console.log(`🔐 Quote ${quoteId} is already locked by another manager`);
+        return res.status(409).json({
+          success: false,
+          message: 'Quote is already locked by another manager'
+        });
+      }
+      console.log(`🔄 Quote ${quoteId} lock has expired, can be re-locked`);
+    }
+    
+    // Set lock expiration (30 minutes)
+    const lockExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    
+    console.log(`⏰ Setting lock until: ${lockExpiresAt}`);
+    
+    // Update the quote to lock it
+    const updatedQuote = await prisma.quote.update({
+      where: { id: quoteId },
+      data: {
+        lockedById: managerId,
+        lockExpiresAt: lockExpiresAt,
+        status: 'IN_PRICING',
+        managerId: managerId  // Also set managerId
       },
       include: {
         items: {
@@ -68,37 +116,175 @@ const getManagerQuotes = async (req, res) => {
             }
           }
         }
-      },
-      orderBy: { createdAt: 'desc' }
+      }
     });
-
-    const quotesWithClients = await Promise.all(
-      quotes.map(async (quote) => {
-        const client = await getClientData(quote.clientId);
-        return {
-          ...quote,
-          client
-        };
-      })
-    );
-
-    console.log(`✅ [getManagerQuotes] Returning ${quotesWithClients.length} quotes`);
-
-    res.json({
+    
+    if (!updatedQuote) {
+      console.log(`❌ Failed to update quote lock status for ${quoteId}`);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to update quote lock status'
+      });
+    }
+    
+    // Get client data
+    const client = await getClientData(updatedQuote.clientId);
+    
+    console.log(`✅ Quote locked successfully: ${quoteId}`);
+    
+    // Return the quote directly, not wrapped in data.quote
+    return res.json({
       success: true,
-      data: quotesWithClients
+      message: 'Quote locked successfully',
+      data: {
+        ...updatedQuote,
+        client
+      }
     });
-
+    
   } catch (err) {
-    console.error('❌ Get manager quotes error:', err);
-    res.status(500).json({
+    console.error('❌ Lock quote error:', err.message);
+    console.error('Error details:', err);
+    
+    if (err.code === 'P2025') {
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found'
+      });
+    }
+    
+    return res.status(500).json({
       success: false,
-      message: 'Failed to fetch quotes'
+      message: err.message || 'Failed to lock quote'
     });
   }
 };
 
+// Delete quote - FIXED (line 543 error)
+const deleteQuote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const managerId = req.user?.id;
+    
+    console.log(`🗑️ Delete request: quoteId=${id}, managerId=${managerId}`);
+    
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quote ID is required'
+      });
+    }
+    
+    if (!managerId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized: Manager ID not found'
+      });
+    }
+    
+    // Find the quote
+    const quote = await prisma.quote.findUnique({
+      where: { id }
+    });
+    
+    if (!quote) {
+      console.log(`❌ Quote ${id} not found in database`);
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found'
+      });
+    }
+    
+    console.log(`📋 Found quote:`, {
+      id: quote.id,
+      status: quote.status,
+      lockedById: quote.lockedById,
+      managerId: quote.managerId,
+      lockExpiresAt: quote.lockExpiresAt
+    });
+    
+    // Check if lock expired
+    const isLockExpired = quote.lockExpiresAt && new Date(quote.lockExpiresAt) < new Date();
+    console.log(`⏰ Lock expired check: ${isLockExpired}`);
+    
+    // Check permissions
+    const canDelete = 
+      (quote.lockedById === managerId && quote.status === 'IN_PRICING') ||
+      (quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired)) ||
+      (quote.managerId === managerId);
+    
+    console.log(`🔐 Permission check for delete:`, {
+      canDelete,
+      conditions: {
+        isLockedByManager: quote.lockedById === managerId && quote.status === 'IN_PRICING',
+        isAvailable: quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired),
+        isAssignedToManager: quote.managerId === managerId
+      }
+    });
+    
+    if (!canDelete) {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only delete quotes that you have locked, that are available, or that are assigned to you'
+      });
+    }
+    
+    // Check if quote can be deleted based on status
+    if (quote.status === 'APPROVED' || quote.status === 'CONVERTED_TO_ORDER') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete approved or converted quotes'
+      });
+    }
+    
+    console.log(`🗑️ Deleting related items for quote: ${id}`);
+    
+    // Delete quote items first
+    const deleteItemsResult = await prisma.quoteItem.deleteMany({
+      where: { quoteId: id }
+    });
+    console.log(`✅ Deleted ${deleteItemsResult.count} quote items`);
+    
+    console.log(`🗑️ Deleting quote: ${id}`);
+    
+    // Delete the quote
+    await prisma.quote.delete({
+      where: { id }
+    });
+    
+    console.log(`✅ Quote deleted successfully: ${id}`);
+    
+    return res.json({
+      success: true,
+      message: 'Quote deleted successfully'
+    });
+    
+  } catch (err) {
+    console.error('❌ Delete quote error:', err.message);
+    console.error('Error stack:', err.stack);
+    
+    if (err.code === 'P2025') {
+      return res.status(404).json({
+        success: false,
+        message: 'Quote not found or already deleted'
+      });
+    }
+    
+    if (err.code === 'P2003') {
+      return res.status(409).json({
+        success: false,
+        message: 'Cannot delete quote due to existing references'
+      });
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: err.message || 'Failed to delete quote. Please try again.'
+    });
+  }
+};
 
+// Get available quotes
 const getAvailableQuotes = async (req, res) => {
   try {
     console.log('🔓 [getAvailableQuotes] Fetching available quotes');
@@ -160,7 +346,6 @@ const getAvailableQuotes = async (req, res) => {
     });
   }
 };
-
 
 // Get locked quotes by current manager
 const getLockedQuotes = async (req, res) => {
@@ -275,79 +460,25 @@ const getAwaitingApprovalQuotes = async (req, res) => {
   }
 };
 
-const lockQuote = async (req, res) => {
+// Get manager quotes
+const getManagerQuotes = async (req, res) => {
   try {
-    const { quoteId } = req.body;
-    const managerId = req.user?.id;
-    
-    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}`);
-    
-    if (!quoteId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Quote ID is required'
-      });
-    }
-    
-    if (!managerId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: Manager ID not found'
-      });
-    }
-    
-    // Check if quote exists FIRST
-    const existingQuote = await prisma.quote.findUnique({
-      where: { id: quoteId },
-      include: {
-        items: true // Include items for better logging
-      }
-    });
-    
-    if (!existingQuote) {
-      console.log(`❌ Quote ${quoteId} not found in database`);
-      return res.status(404).json({
-        success: false,
-        message: 'Quote not found'
-      });
-    }
-    
-    console.log(`📋 Found quote:`, {
-      id: existingQuote.id,
-      status: existingQuote.status,
-      lockedById: existingQuote.lockedById,
-      lockExpiresAt: existingQuote.lockExpiresAt,
-      itemCount: existingQuote.items?.length || 0
-    });
-    
-    // Check if already locked
-    if (existingQuote.lockedById && existingQuote.lockedById !== managerId) {
-      const lockExpired = existingQuote.lockExpiresAt && 
-                         new Date(existingQuote.lockExpiresAt) < new Date();
-      
-      if (!lockExpired) {
-        console.log(`🔐 Quote ${quoteId} is already locked by manager: ${existingQuote.lockedById}`);
-        return res.status(409).json({
-          success: false,
-          message: 'Quote is already locked by another manager'
-        });
-      }
-      console.log(`🔄 Quote ${quoteId} lock has expired, can be re-locked`);
-    }
-    
-    // Set lock expiration (30 minutes from now)
-    const lockExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
-    
-    console.log(`⏰ Setting lock until: ${lockExpiresAt.toISOString()}`);
-    
-    // Update the quote with lock
-    const updatedQuote = await prisma.quote.update({
-      where: { id: quoteId },
-      data: {
-        lockedById: managerId,
-        lockExpiresAt: lockExpiresAt,
-        status: 'IN_PRICING',
-        lockedAt: new Date()
+    const managerId = req.user.id;
+
+    console.log(`📊 [getManagerQuotes] Fetching for manager: ${managerId}`);
+
+    const quotes = await prisma.quote.findMany({
+      where: {
+        OR: [
+          { managerId },
+          { lockedById: managerId },
+          { status: 'PENDING_PRICING' },
+          { status: 'IN_PRICING' },
+          {
+            status: 'AWAITING_CLIENT_APPROVAL',
+            managerId: managerId
+          }
+        ]
       },
       include: {
         items: {
@@ -364,55 +495,36 @@ const lockQuote = async (req, res) => {
             }
           }
         }
-      }
+      },
+      orderBy: { createdAt: 'desc' }
     });
-    
-    console.log(`✅ Quote locked successfully: ${quoteId}`, {
-      lockedById: updatedQuote.lockedById,
-      status: updatedQuote.status,
-      lockExpiresAt: updatedQuote.lockExpiresAt
-    });
-    
-    // Get client data safely
-    let client = null;
-    if (updatedQuote.clientId) {
-      client = await getClientData(updatedQuote.clientId);
-    } else {
-      client = {
-        id: 'unknown',
-        name: 'Unknown Client',
-        email: null,
-        phone: null,
-        hotelName: null
-      };
-    }
-    
-    return res.json({
+
+    const quotesWithClients = await Promise.all(
+      quotes.map(async (quote) => {
+        const client = await getClientData(quote.clientId);
+        return {
+          ...quote,
+          client
+        };
+      })
+    );
+
+    console.log(`✅ [getManagerQuotes] Returning ${quotesWithClients.length} quotes`);
+
+    res.json({
       success: true,
-      message: 'Quote locked successfully',
-      data: {
-        ...updatedQuote,
-        client
-      }
+      data: quotesWithClients
     });
-    
+
   } catch (err) {
-    console.error('❌ Lock quote error:', err.message);
-    console.error('Error details:', err);
-    
-    if (err.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Quote not found'
-      });
-    }
-    
-    return res.status(500).json({
+    console.error('❌ Get manager quotes error:', err);
+    res.status(500).json({
       success: false,
-      message: err.message || 'Failed to lock quote'
+      message: 'Failed to fetch quotes'
     });
   }
 };
+
 // Update pricing
 const updatePricing = async (req, res) => {
   try {
@@ -514,116 +626,6 @@ const updatePricing = async (req, res) => {
     res.status(500).json({
       success: false,
       message: err.message || 'Failed to update pricing'
-    });
-  }
-};
-
-// Delete quote - COMPLETE FIX
-const deleteQuote = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const managerId = req.user?.id;
-    
-    console.log(`🗑️ Delete request: quoteId=${id}, managerId=${managerId}`);
-    
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: 'Quote ID is required'
-      });
-    }
-    
-    if (!managerId) {
-      return res.status(401).json({
-        success: false,
-        message: 'Unauthorized: Manager ID not found'
-      });
-    }
-    
-    const quote = await prisma.quote.findUnique({
-      where: { id }
-    });
-    
-    if (!quote) {
-      console.log(`❌ Quote ${id} not found in database`);
-      return res.status(404).json({
-        success: false,
-        message: 'Quote not found'
-      });
-    }
-    
-    console.log(`📋 Found quote:`, {
-      id: quote.id,
-      status: quote.status,
-      lockedById: quote.lockedById,
-      managerId: quote.managerId,
-      lockExpiresAt: quote.lockExpiresAt
-    });
-    
-    const isLockExpired = quote.lockExpiresAt && new Date(quote.lockExpiresAt) < new Date();
-    console.log(`⏰ Lock expired check: ${isLockExpired}`);
-    
-    const canDelete = 
-      (quote.lockedById === managerId && quote.status === 'IN_PRICING') ||
-      (quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired)) ||
-      (quote.managerId === managerId);
-    
-    console.log(`🔐 Permission check for delete:`, {
-      canDelete,
-      conditions: {
-        isLockedByManager: quote.lockedById === managerId && quote.status === 'IN_PRICING',
-        isAvailable: quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired),
-        isAssignedToManager: quote.managerId === managerId
-      }
-    });
-    
-    if (!canDelete) {
-      return res.status(403).json({
-        success: false,
-        message: 'You can only delete quotes that you have locked, that are available, or that are assigned to you'
-      });
-    }
-    
-    console.log(`🗑️ Deleting related items for quote: ${id}`);
-    
-    const deleteItemsResult = await prisma.quoteItem.deleteMany({
-      where: { quoteId: id }
-    });
-    console.log(`✅ Deleted ${deleteItemsResult.count} quote items`);
-    
-    console.log(`🗑️ Deleting quote: ${id}`);
-    await prisma.quote.delete({
-      where: { id }
-    });
-    
-    console.log(`✅ Quote deleted successfully: ${id}`);
-    
-    return res.json({
-      success: true,
-      message: 'Quote deleted successfully'
-    });
-    
-  } catch (err) {
-    console.error('❌ Delete quote error:', err);
-    console.error('Error stack:', err.stack);
-    
-    if (err.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Quote not found or already deleted'
-      });
-    }
-    
-    if (err.code === 'P2003') {
-      return res.status(409).json({
-        success: false,
-        message: 'Cannot delete quote due to existing references'
-      });
-    }
-    
-    return res.status(500).json({
-      success: false,
-      message: err.message || 'Failed to delete quote. Please try again.'
     });
   }
 };
