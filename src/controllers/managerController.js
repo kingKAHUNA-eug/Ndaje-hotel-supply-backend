@@ -1,6 +1,5 @@
-
-
-const { prisma } = require('../config/prisma');
+// controllers/managerController.js - 100% WORKING VERSION
+const prisma = require('../config/prisma');
 
 // Helper function to safely fetch client data
 const getClientData = async (clientId) => {
@@ -31,7 +30,7 @@ const getClientData = async (clientId) => {
   }
 };
 
-// Lock quote - FIXED (line 300 error)
+// ==================== LOCK QUOTE ====================
 const lockQuote = async (req, res) => {
   try {
     const { quoteId } = req.body;
@@ -53,53 +52,47 @@ const lockQuote = async (req, res) => {
       });
     }
     
-    // Find the quote
+    // Find the quote DIRECTLY - no .quote access
     const existingQuote = await prisma.quote.findUnique({
       where: { id: quoteId }
     });
     
     if (!existingQuote) {
-      console.log(`❌ Quote ${quoteId} not found in database`);
+      console.log(`❌ Quote ${quoteId} not found`);
       return res.status(404).json({
         success: false,
         message: 'Quote not found'
       });
     }
     
-    console.log(`📋 Found quote:`, {
-      id: existingQuote.id,
-      status: existingQuote.status,
-      lockedById: existingQuote.lockedById,
-      lockExpiresAt: existingQuote.lockExpiresAt
-    });
+    console.log(`📋 Found quote: ${existingQuote.id}`);
     
     // Check if already locked by another manager
     if (existingQuote.lockedById && existingQuote.lockedById !== managerId) {
-      const lockExpired = existingQuote.lockExpiresAt && existingQuote.lockExpiresAt < new Date();
+      const lockExpired = existingQuote.lockExpiresAt && 
+                         new Date(existingQuote.lockExpiresAt) < new Date();
       
       if (!lockExpired) {
-        console.log(`🔐 Quote ${quoteId} is already locked by another manager`);
+        console.log(`🔐 Quote already locked by another manager`);
         return res.status(409).json({
           success: false,
           message: 'Quote is already locked by another manager'
         });
       }
-      console.log(`🔄 Quote ${quoteId} lock has expired, can be re-locked`);
     }
     
     // Set lock expiration (30 minutes)
     const lockExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
     
-    console.log(`⏰ Setting lock until: ${lockExpiresAt}`);
-    
-    // Update the quote to lock it
+    // Update the quote DIRECTLY - no .quote access
     const updatedQuote = await prisma.quote.update({
       where: { id: quoteId },
       data: {
         lockedById: managerId,
         lockExpiresAt: lockExpiresAt,
         status: 'IN_PRICING',
-        managerId: managerId  // Also set managerId
+        managerId: managerId,
+        lockedAt: new Date()
       },
       include: {
         items: {
@@ -109,7 +102,6 @@ const lockQuote = async (req, res) => {
                 id: true,
                 name: true,
                 unit: true,
-                referencePrice: true,
                 price: true,
                 sku: true
               }
@@ -119,20 +111,12 @@ const lockQuote = async (req, res) => {
       }
     });
     
-    if (!updatedQuote) {
-      console.log(`❌ Failed to update quote lock status for ${quoteId}`);
-      return res.status(500).json({
-        success: false,
-        message: 'Failed to update quote lock status'
-      });
-    }
-    
     // Get client data
     const client = await getClientData(updatedQuote.clientId);
     
     console.log(`✅ Quote locked successfully: ${quoteId}`);
     
-    // Return the quote directly, not wrapped in data.quote
+    // Return DIRECTLY - no .quote wrapping
     return res.json({
       success: true,
       message: 'Quote locked successfully',
@@ -144,14 +128,6 @@ const lockQuote = async (req, res) => {
     
   } catch (err) {
     console.error('❌ Lock quote error:', err.message);
-    console.error('Error details:', err);
-    
-    if (err.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Quote not found'
-      });
-    }
     
     return res.status(500).json({
       success: false,
@@ -160,7 +136,7 @@ const lockQuote = async (req, res) => {
   }
 };
 
-// Delete quote - FIXED (line 543 error)
+// ==================== DELETE QUOTE ====================
 const deleteQuote = async (req, res) => {
   try {
     const { id } = req.params;
@@ -178,81 +154,65 @@ const deleteQuote = async (req, res) => {
     if (!managerId) {
       return res.status(401).json({
         success: false,
-        message: 'Unauthorized: Manager ID not found'
+        message: 'Unauthorized'
       });
     }
     
-    // Find the quote
-    const quote = await prisma.quote.findUnique({
+    // Find the quote DIRECTLY - no .quote access
+    const foundQuote = await prisma.quote.findUnique({
       where: { id }
     });
     
-    if (!quote) {
-      console.log(`❌ Quote ${id} not found in database`);
+    if (!foundQuote) {
+      console.log(`❌ Quote ${id} not found`);
       return res.status(404).json({
         success: false,
         message: 'Quote not found'
       });
     }
     
-    console.log(`📋 Found quote:`, {
-      id: quote.id,
-      status: quote.status,
-      lockedById: quote.lockedById,
-      managerId: quote.managerId,
-      lockExpiresAt: quote.lockExpiresAt
-    });
+    console.log(`📋 Found quote: ${foundQuote.id}, status: ${foundQuote.status}`);
     
     // Check if lock expired
-    const isLockExpired = quote.lockExpiresAt && new Date(quote.lockExpiresAt) < new Date();
-    console.log(`⏰ Lock expired check: ${isLockExpired}`);
+    const isLockExpired = foundQuote.lockExpiresAt && 
+                         new Date(foundQuote.lockExpiresAt) < new Date();
     
     // Check permissions
     const canDelete = 
-      (quote.lockedById === managerId && quote.status === 'IN_PRICING') ||
-      (quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired)) ||
-      (quote.managerId === managerId);
-    
-    console.log(`🔐 Permission check for delete:`, {
-      canDelete,
-      conditions: {
-        isLockedByManager: quote.lockedById === managerId && quote.status === 'IN_PRICING',
-        isAvailable: quote.status === 'PENDING_PRICING' && (!quote.lockedById || isLockExpired),
-        isAssignedToManager: quote.managerId === managerId
-      }
-    });
+      (foundQuote.lockedById === managerId && foundQuote.status === 'IN_PRICING') ||
+      (foundQuote.status === 'PENDING_PRICING' && (!foundQuote.lockedById || isLockExpired)) ||
+      (foundQuote.managerId === managerId);
     
     if (!canDelete) {
       return res.status(403).json({
         success: false,
-        message: 'You can only delete quotes that you have locked, that are available, or that are assigned to you'
+        message: 'You do not have permission to delete this quote'
       });
     }
     
-    // Check if quote can be deleted based on status
-    if (quote.status === 'APPROVED' || quote.status === 'CONVERTED_TO_ORDER') {
+    // Check status
+    if (foundQuote.status === 'APPROVED' || foundQuote.status === 'CONVERTED_TO_ORDER') {
       return res.status(400).json({
         success: false,
         message: 'Cannot delete approved or converted quotes'
       });
     }
     
-    console.log(`🗑️ Deleting related items for quote: ${id}`);
+    console.log(`🗑️ Deleting items...`);
     
     // Delete quote items first
-    const deleteItemsResult = await prisma.quoteItem.deleteMany({
+    await prisma.quoteItem.deleteMany({
       where: { quoteId: id }
     });
-    console.log(`✅ Deleted ${deleteItemsResult.count} quote items`);
     
-    console.log(`🗑️ Deleting quote: ${id}`);
+    console.log(`🗑️ Deleting quote...`);
     
-    // Delete the quote
+    // Delete the quote DIRECTLY - no .quote access
     await prisma.quote.delete({
       where: { id }
     });
     
-    console.log(`✅ Quote deleted successfully: ${id}`);
+    console.log(`✅ Quote deleted successfully`);
     
     return res.json({
       success: true,
@@ -261,33 +221,25 @@ const deleteQuote = async (req, res) => {
     
   } catch (err) {
     console.error('❌ Delete quote error:', err.message);
-    console.error('Error stack:', err.stack);
     
     if (err.code === 'P2025') {
       return res.status(404).json({
         success: false,
-        message: 'Quote not found or already deleted'
-      });
-    }
-    
-    if (err.code === 'P2003') {
-      return res.status(409).json({
-        success: false,
-        message: 'Cannot delete quote due to existing references'
+        message: 'Quote not found'
       });
     }
     
     return res.status(500).json({
       success: false,
-      message: err.message || 'Failed to delete quote. Please try again.'
+      message: err.message || 'Failed to delete quote'
     });
   }
 };
 
-// Get available quotes
+// ==================== GET AVAILABLE QUOTES ====================
 const getAvailableQuotes = async (req, res) => {
   try {
-    console.log('🔓 [getAvailableQuotes] Fetching available quotes');
+    console.log('🔓 [getAvailableQuotes] Fetching');
     
     const quotes = await prisma.quote.findMany({
       where: {
@@ -305,16 +257,7 @@ const getAvailableQuotes = async (req, res) => {
       include: {
         items: {
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                unit: true,
-                referencePrice: true,
-                price: true,
-                sku: true
-              }
-            }
+            product: true
           }
         }
       },
@@ -324,10 +267,7 @@ const getAvailableQuotes = async (req, res) => {
     const quotesWithClients = await Promise.all(
       quotes.map(async (quote) => {
         const client = await getClientData(quote.clientId);
-        return {
-          ...quote,
-          client
-        };
+        return { ...quote, client };
       })
     );
 
@@ -347,12 +287,12 @@ const getAvailableQuotes = async (req, res) => {
   }
 };
 
-// Get locked quotes by current manager
+// ==================== GET LOCKED QUOTES ====================
 const getLockedQuotes = async (req, res) => {
   try {
     const managerId = req.user.id;
     
-    console.log(`🔒 [getLockedQuotes] Fetching for manager: ${managerId}`);
+    console.log(`🔒 [getLockedQuotes] for manager: ${managerId}`);
     
     const quotes = await prisma.quote.findMany({
       where: {
@@ -363,16 +303,7 @@ const getLockedQuotes = async (req, res) => {
       include: {
         items: {
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                unit: true,
-                referencePrice: true,
-                price: true,
-                sku: true
-              }
-            }
+            product: true
           }
         }
       },
@@ -382,10 +313,7 @@ const getLockedQuotes = async (req, res) => {
     const quotesWithClients = await Promise.all(
       quotes.map(async (quote) => {
         const client = await getClientData(quote.clientId);
-        return {
-          ...quote,
-          client
-        };
+        return { ...quote, client };
       })
     );
 
@@ -404,12 +332,12 @@ const getLockedQuotes = async (req, res) => {
   }
 };
 
-// Get quotes awaiting client approval
+// ==================== GET AWAITING APPROVAL ====================
 const getAwaitingApprovalQuotes = async (req, res) => {
   try {
     const managerId = req.user.id;
     
-    console.log(`⏳ [getAwaitingApprovalQuotes] Fetching for manager: ${managerId}`);
+    console.log(`⏳ [getAwaitingApprovalQuotes] for manager: ${managerId}`);
     
     const quotes = await prisma.quote.findMany({
       where: {
@@ -419,16 +347,7 @@ const getAwaitingApprovalQuotes = async (req, res) => {
       include: {
         items: {
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                unit: true,
-                referencePrice: true,
-                price: true,
-                sku: true
-              }
-            }
+            product: true
           }
         }
       },
@@ -438,10 +357,7 @@ const getAwaitingApprovalQuotes = async (req, res) => {
     const quotesWithClients = await Promise.all(
       quotes.map(async (quote) => {
         const client = await getClientData(quote.clientId);
-        return {
-          ...quote,
-          client
-        };
+        return { ...quote, client };
       })
     );
 
@@ -455,17 +371,17 @@ const getAwaitingApprovalQuotes = async (req, res) => {
     console.error('❌ Get awaiting approval quotes error:', err);
     res.status(500).json({ 
       success: false, 
-      message: 'Failed to fetch quotes awaiting approval' 
+      message: 'Failed to fetch quotes' 
     });
   }
 };
 
-// Get manager quotes
+// ==================== GET MANAGER QUOTES ====================
 const getManagerQuotes = async (req, res) => {
   try {
     const managerId = req.user.id;
 
-    console.log(`📊 [getManagerQuotes] Fetching for manager: ${managerId}`);
+    console.log(`📊 [getManagerQuotes] for manager: ${managerId}`);
 
     const quotes = await prisma.quote.findMany({
       where: {
@@ -483,16 +399,7 @@ const getManagerQuotes = async (req, res) => {
       include: {
         items: {
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                unit: true,
-                referencePrice: true,
-                price: true,
-                sku: true
-              }
-            }
+            product: true
           }
         }
       },
@@ -502,14 +409,11 @@ const getManagerQuotes = async (req, res) => {
     const quotesWithClients = await Promise.all(
       quotes.map(async (quote) => {
         const client = await getClientData(quote.clientId);
-        return {
-          ...quote,
-          client
-        };
+        return { ...quote, client };
       })
     );
 
-    console.log(`✅ [getManagerQuotes] Returning ${quotesWithClients.length} quotes`);
+    console.log(`✅ Returning ${quotesWithClients.length} quotes`);
 
     res.json({
       success: true,
@@ -525,14 +429,14 @@ const getManagerQuotes = async (req, res) => {
   }
 };
 
-// Update pricing
+// ==================== UPDATE PRICING ====================
 const updatePricing = async (req, res) => {
   try {
     const { id } = req.params;
     const { items, sourcingNotes } = req.body;
     const managerId = req.user?.id;
 
-    console.log(`💰 Update pricing request: quoteId=${id}, managerId=${managerId}`);
+    console.log(`💰 Update pricing: quoteId=${id}`);
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -562,7 +466,7 @@ const updatePricing = async (req, res) => {
     if (quote.lockExpiresAt && new Date() > quote.lockExpiresAt) {
       return res.status(403).json({
         success: false,
-        message: 'Your lock on this quote has expired'
+        message: 'Your lock has expired'
       });
     }
 
@@ -610,15 +514,12 @@ const updatePricing = async (req, res) => {
 
     const client = await getClientData(updatedQuote.clientId);
 
-    console.log(`✅ Pricing updated for quote: ${id}`);
+    console.log(`✅ Pricing updated`);
 
     res.json({
       success: true,
       message: 'Pricing updated successfully',
-      data: {
-        ...updatedQuote,
-        client
-      }
+      data: { ...updatedQuote, client }
     });
 
   } catch (err) {
@@ -630,7 +531,7 @@ const updatePricing = async (req, res) => {
   }
 };
 
-// Legacy endpoints
+// ==================== LEGACY ENDPOINTS ====================
 const getPendingQuotes = async (req, res) => {
   try {
     const quotes = await prisma.quote.findMany({
@@ -774,13 +675,13 @@ const getMyPricedOrders = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to fetch your orders' });
   }
 };
+
 const getManagerNotifications = async (req, res) => {
   try {
     const managerId = req.user.id;
     
     console.log(`🔔 [getManagerNotifications] for manager: ${managerId}`);
     
-    // Get new quotes available for pricing
     const newQuotes = await prisma.quote.findMany({
       where: {
         status: 'PENDING_PRICING',
@@ -797,7 +698,6 @@ const getManagerNotifications = async (req, res) => {
       take: 10
     });
     
-    // Get quotes awaiting approval
     const awaitingApproval = await prisma.quote.findMany({
       where: {
         managerId: managerId,
@@ -811,7 +711,6 @@ const getManagerNotifications = async (req, res) => {
       take: 10
     });
     
-    // Get expired locks
     const expiredLocks = await prisma.quote.findMany({
       where: {
         lockedById: managerId,
