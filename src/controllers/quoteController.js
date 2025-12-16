@@ -90,29 +90,149 @@ const addQuoteItems = async (req, res) => {
 const updateQuoteItems = async (req, res) => {
   try {
     const { quoteId } = req.params;
-    const managerId = req.user.userId;
+    let managerId = req.user.id;
     const { items, sourcingNotes } = updateQuoteItemsSchema.parse(req.body);
-
-    const quote = await QuoteService.updateQuotePricing(quoteId, managerId, items, sourcingNotes);
-
+    
+    console.log('🔧 Update pricing request:', {
+      quoteId,
+      incomingManagerId: managerId,
+      user: req.user
+    });
+    
+    // ✅ EXTRACT MongoDB ID (same as lock function)
+    let mongoId = managerId;
+    if (managerId && managerId.includes('_')) {
+      const parts = managerId.split('_');
+      const lastPart = parts[parts.length - 1];
+      if (lastPart.length === 24 && /^[0-9a-fA-F]{24}$/.test(lastPart)) {
+        mongoId = lastPart;
+      }
+    }
+    
+    // Find the quote
+    const quote = await prisma.quote.findUnique({
+      where: { id: quoteId }
+    });
+    
+    if (!quote) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Quote not found' 
+      });
+    }
+    
+    // ✅ Check lock with EXTRACTED MongoDB ID
+    if (quote.lockedById !== mongoId) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'You do not have an active lock on this quote' 
+      });
+    }
+    
+    // Check lock expiration
+    if (quote.lockExpiresAt && new Date(quote.lockExpiresAt) < new Date()) {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Your lock on this quote has expired' 
+      });
+    }
+    
+    if (quote.status !== 'IN_PRICING') {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Quote is not in pricing state' 
+      });
+    }
+    
+    // Update items with new pricing
+    const updatePromises = items.map(item => 
+      prisma.quoteItem.updateMany({
+        where: { 
+          quoteId: quoteId,
+          productId: item.productId 
+        },
+        data: { 
+          unitPrice: item.unitPrice,
+          totalPrice: item.unitPrice * (quote.items.find(qi => qi.productId === item.productId)?.quantity || 1)
+        }
+      })
+    );
+    
+    await Promise.all(updatePromises);
+    
+    // Calculate new total
+    const updatedItems = await prisma.quoteItem.findMany({
+      where: { quoteId: quoteId }
+    });
+    
+    const totalAmount = updatedItems.reduce((sum, item) => sum + item.totalPrice, 0);
+    
+    // Update quote with new total and status
+    const updatedQuote = await prisma.quote.update({
+      where: { id: quoteId },
+      data: {
+        sourcingNotes: sourcingNotes || quote.sourcingNotes,
+        totalAmount: totalAmount,
+        status: 'AWAITING_CLIENT_APPROVAL',
+        // Clear the lock now that pricing is submitted
+        lockedById: null,
+        lockExpiresAt: null,
+        lockedAt: null
+      },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                description: true,
+                category: true,
+                price: true
+              }
+            }
+          }
+        },
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        }
+      }
+    });
+    
+    console.log('✅ Quote pricing updated:', quoteId);
+    
     res.status(200).json({
       success: true,
       message: 'Quote pricing updated',
-      data: { quote }
+      data: { quote: updatedQuote }
     });
+    
   } catch (error) {
+    console.error('Update pricing error:', error);
+    
     let statusCode = 500;
-    if (error.message.includes('do not have an active lock')) {
+    let message = 'Failed to update pricing';
+    
+    if (error instanceof z.ZodError) {
+      statusCode = 400;
+      message = 'Validation error';
+    } else if (error.message.includes('not found')) {
+      statusCode = 404;
+    } else if (error.message.includes('active lock') || error.message.includes('expired')) {
       statusCode = 403;
-      error.message = 'You do not have an active lock on this quote. Please lock it first.';
     } else if (error.message.includes('not in pricing state')) {
       statusCode = 400;
     }
     
-    res.status(statusCode).json({ success: false, message: error.message });
+    res.status(statusCode).json({ success: false, message });
   }
 };
-
 // Client finalizes quote (sends to manager)
 const finalizeQuote = async (req, res) => {
   try {
@@ -241,9 +361,28 @@ const getClientQuotes = async (req, res) => {
 const lockQuoteForPricing = async (req, res) => {
   try {
     const { quoteId } = lockQuoteSchema.parse(req.body);
-    const managerId = req.user.userId;
+    let managerId = req.user.id; // This could be the composite ID
     
-    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}`);
+    console.log('🔒 Starting lock process:', {
+      quoteId,
+      incomingManagerId: managerId,
+      fullUser: req.user
+    });
+    
+    // ✅ EXTRACT MongoDB ID from composite string
+    let mongoId = managerId;
+    
+    // If it's a composite ID like "mgr_name_mongoId", extract the MongoDB part
+    if (managerId && managerId.includes('_')) {
+      const parts = managerId.split('_');
+      const lastPart = parts[parts.length - 1];
+      
+      // Check if it's a MongoDB ObjectId (24 hex chars)
+      if (lastPart.length === 24 && /^[0-9a-fA-F]{24}$/.test(lastPart)) {
+        mongoId = lastPart;
+        console.log('✅ Extracted MongoDB ID from composite:', mongoId);
+      }
+    }
     
     // Verify quote exists
     const quote = await prisma.quote.findUnique({
@@ -266,16 +405,15 @@ const lockQuoteForPricing = async (req, res) => {
     }
     
     // Check if quote is already locked
-    if (quote.lockedById && quote.lockedById !== managerId) {
+    if (quote.lockedById && quote.lockedById !== mongoId) {
       // Check if lock has expired
       const isLockExpired = quote.lockExpiresAt && new Date() > new Date(quote.lockExpiresAt);
       
       if (!isLockExpired) {
         // Get the manager who locked it
         const lockedManager = await prisma.user.findUnique({
-          where: { id: quote.lockedById },
-          select: { name: true }
-        });
+          where: { firebaseUid: quote.lockedById }
+        }).catch(() => null);
         
         return res.status(409).json({
           success: false,
@@ -288,14 +426,21 @@ const lockQuoteForPricing = async (req, res) => {
     const lockExpiresAt = new Date();
     lockExpiresAt.setMinutes(lockExpiresAt.getMinutes() + 30);
     
-    // Lock the quote
+    console.log('🔐 About to lock quote with:', {
+      originalManagerId: managerId,
+      mongoIdForLock: mongoId,
+      lockExpiresAt
+    });
+    
+    // ✅ Lock the quote with EXTRACTED MongoDB ID
     const updatedQuote = await prisma.quote.update({
       where: { id: quoteId },
       data: {
         status: 'IN_PRICING',
-        lockedById: managerId,
+        lockedById: mongoId, // Store as plain MongoDB ID
         lockedAt: new Date(),
-        lockExpiresAt: lockExpiresAt
+        lockExpiresAt: lockExpiresAt,
+        managerId: mongoId // Also store for reference
       },
       include: {
         items: {
@@ -323,7 +468,11 @@ const lockQuoteForPricing = async (req, res) => {
       }
     });
     
-    console.log(`✅ Quote locked successfully: ${quoteId}`);
+    console.log(`✅ Quote locked successfully:`, {
+      quoteId: updatedQuote.id,
+      lockedById: updatedQuote.lockedById,
+      lockExpiresAt: updatedQuote.lockExpiresAt
+    });
     
     return res.json({
       success: true,
