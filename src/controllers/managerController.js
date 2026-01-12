@@ -58,8 +58,9 @@ const lockQuote = async (req, res) => {
     const { quoteId } = req.body;
     // Extract MongoDB ID from composite ID
     const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    const rawManagerId = req.user?.id || req.user?.userId;
     
-    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}, rawId=${req.user?.id}`);
+    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}, rawId=${rawManagerId}`);
     
     if (!quoteId) {
       return res.status(400).json({
@@ -88,15 +89,17 @@ const lockQuote = async (req, res) => {
       });
     }
     
-    console.log(`📋 Found quote: ${existingQuote.id}`);
+    console.log(`📋 Found quote: ${existingQuote.id}, current lock: ${existingQuote.lockedById}`);
     
-    // Check if already locked by another manager
-    if (existingQuote.lockedById && existingQuote.lockedById !== managerId) {
+    // Check if already locked by another manager (check both ID formats)
+    if (existingQuote.lockedById && 
+        existingQuote.lockedById !== managerId && 
+        existingQuote.lockedById !== rawManagerId) {
       const lockExpired = existingQuote.lockExpiresAt && 
                          new Date(existingQuote.lockExpiresAt) < new Date();
       
       if (!lockExpired) {
-        console.log(`🔐 Quote already locked by another manager`);
+        console.log(`🔐 Quote already locked by another manager: ${existingQuote.lockedById}`);
         return res.status(409).json({
           success: false,
           message: 'Quote is already locked by another manager'
@@ -107,11 +110,11 @@ const lockQuote = async (req, res) => {
     // Set lock expiration (30 minutes)
     const lockExpiresAt = new Date(Date.now() + 30 * 60 * 1000);
     
-    // Update the quote DIRECTLY - no .quote access
+    // Update the quote DIRECTLY - store MongoDB ID for consistency
     const updatedQuote = await prisma.quote.update({
       where: { id: quoteId },
       data: {
-        lockedById: managerId,
+        lockedById: managerId, // Store MongoDB ID for consistency
         lockExpiresAt: lockExpiresAt,
         status: 'IN_PRICING',
         managerId: managerId,
@@ -318,12 +321,17 @@ const getLockedQuotes = async (req, res) => {
   try {
     // Extract MongoDB ID from composite ID
     const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    const rawManagerId = req.user?.id || req.user?.userId;
     
-    console.log(`🔒 [getLockedQuotes] for manager: ${managerId}, rawId=${req.user?.id}`);
+    console.log(`🔒 [getLockedQuotes] for manager: ${managerId}, rawId=${rawManagerId}`);
     
+    // Check for both composite ID and extracted MongoDB ID to handle legacy data
     const quotes = await prisma.quote.findMany({
       where: {
-        lockedById: managerId,
+        OR: [
+          { lockedById: managerId },
+          { lockedById: rawManagerId }
+        ],
         status: 'IN_PRICING',
         lockExpiresAt: { gt: new Date() }
       },
@@ -362,13 +370,19 @@ const getLockedQuotes = async (req, res) => {
 // ==================== GET AWAITING APPROVAL ====================
 const getAwaitingApprovalQuotes = async (req, res) => {
   try {
-    const managerId = req.user.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    const rawManagerId = req.user?.id || req.user?.userId;
     
-    console.log(`⏳ [getAwaitingApprovalQuotes] for manager: ${managerId}`);
+    console.log(`⏳ [getAwaitingApprovalQuotes] for manager: ${managerId}, rawId=${rawManagerId}`);
     
+    // Check for both composite ID and extracted MongoDB ID
     const quotes = await prisma.quote.findMany({
       where: {
-        managerId: managerId,
+        OR: [
+          { managerId: managerId },
+          { managerId: rawManagerId }
+        ],
         status: 'AWAITING_CLIENT_APPROVAL'
       },
       include: {
@@ -464,8 +478,9 @@ const updatePricing = async (req, res) => {
     const { items, sourcingNotes } = req.body;
     // Extract MongoDB ID from composite ID
     const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    const rawManagerId = req.user?.id || req.user?.userId;
 
-    console.log(`💰 Update pricing: quoteId=${id}, managerId=${managerId}, rawId=${req.user?.id}`);
+    console.log(`💰 Update pricing: quoteId=${id}, managerId=${managerId}, rawId=${rawManagerId}`);
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -485,7 +500,8 @@ const updatePricing = async (req, res) => {
       });
     }
 
-    if (quote.lockedById !== managerId) {
+    // Check for both composite ID and extracted MongoDB ID
+    if (quote.lockedById !== managerId && quote.lockedById !== rawManagerId) {
       return res.status(403).json({
         success: false,
         message: 'You do not have a lock on this quote'
