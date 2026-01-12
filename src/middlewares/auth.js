@@ -1,6 +1,35 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 
+// Simple role-based authorization middleware factory
+const authorize = (...allowedRoles) => {
+  return (req, res, next) => {
+    try {
+      if (!req.user || !req.user.role) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized'
+        });
+      }
+
+      if (!allowedRoles.includes(req.user.role)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Forbidden: insufficient permissions'
+        });
+      }
+
+      next();
+    } catch (err) {
+      console.error('Authorization error:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Authorization failed'
+      });
+    }
+  };
+};
+
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
