@@ -1,5 +1,5 @@
 // controllers/driverController.js - COMPLETE DRIVER DASHBOARD
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 
 class DriverController {
   // Get driver's assigned deliveries

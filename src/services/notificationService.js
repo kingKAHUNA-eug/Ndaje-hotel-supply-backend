@@ -1,5 +1,5 @@
 // services/notificationService.js
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 
 class NotificationService {
   static async createNotification(userId, title, message, type = 'INFO', link = null) {

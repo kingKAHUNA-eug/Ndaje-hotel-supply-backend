@@ -3,7 +3,8 @@ const router = express.Router();
 const {
   authenticateToken,
   requireClient,
-  requireManager
+  requireManager,
+  requireManagerOrAdmin
 } = require('../middlewares/auth');
 
 const {
@@ -57,8 +58,8 @@ router.get('/:quoteId/lock-status', requireManager, checkQuoteLockStatus);
 // Update pricing
 router.put('/:quoteId/update-pricing', requireManager, updateQuoteItems);
 
-// Delete quote (Manager)
-router.delete('/:quoteId/delete', requireManager, deleteQuoteByManager);
+// Delete quote (Manager/Admin)
+router.delete('/:quoteId/delete', requireManagerOrAdmin, deleteQuoteByManager);
 
 // Client quotes route
 router.get('/client/my-quotes', requireClient, getClientQuotes);

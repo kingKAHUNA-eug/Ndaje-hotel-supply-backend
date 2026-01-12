@@ -6,7 +6,7 @@ const {
   requestPasswordReset 
 } = require('../controllers/authController');
 const { authenticateToken } = require('../middlewares/auth');
-const { prisma } = require('../config/prisma');
+const prisma = require('../config/prisma');
 const admin = require('../config/firebase'); // ← YOUR FILE!
 
 const router = express.Router();
@@ -15,6 +15,45 @@ const router = express.Router();
 router.post('/signup', signup);
 router.post('/login', login);
 router.post('/forgot-password', requestPasswordReset);
+
+// Session info (aliases /profile for compatibility)
+router.get('/me', authenticateToken, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.userId },
+      select: { 
+        id: true,
+        firebaseUid: true,
+        name: true,
+        email: true,
+        role: true,
+        phone: true
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          id: user.firebaseUid || user.id, // backward compatible id seen by clients
+          _id: user.id,                    // MongoDB/ObjectId for locking logic
+          firebaseUid: user.firebaseUid,
+          name: user.name,
+          email: user.email,
+          phone: user.phone,
+          role: user.role
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Profile fetch error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
 
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
