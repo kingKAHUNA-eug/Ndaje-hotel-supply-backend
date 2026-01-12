@@ -1540,6 +1540,349 @@ const getQuoteStatistics = async (req, res) => {
 
 
 // ======================== EXPORT ========================
+// ======================== ADMIN DASHBOARD ENDPOINTS ========================
+
+// Get income card data (total revenue from paid orders)
+const getIncomeCard = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    
+    let dateFilter = {};
+    if (startDate || endDate) {
+      dateFilter.createdAt = {};
+      if (startDate) dateFilter.createdAt.gte = new Date(startDate);
+      if (endDate) dateFilter.createdAt.lte = new Date(endDate);
+    } else {
+      // Default to last 30 days
+      dateFilter.createdAt = {
+        gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+      };
+    }
+
+    // Get all paid orders
+    const paidOrders = await prisma.order.findMany({
+      where: {
+        ...dateFilter,
+        status: {
+          in: ['PAID_AND_APPROVED', 'IN_TRANSIT', 'DELIVERED']
+        },
+        payment: {
+          status: 'APPROVED'
+        }
+      },
+      include: {
+        payment: {
+          select: {
+            amount: true,
+            status: true
+          }
+        }
+      }
+    });
+
+    // Calculate total income
+    const totalIncome = paidOrders.reduce((sum, order) => {
+      return sum + (order.payment?.amount || order.total || 0);
+    }, 0);
+
+    // Get today's income
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayOrders = paidOrders.filter(order => 
+      new Date(order.createdAt) >= todayStart
+    );
+    const todayIncome = todayOrders.reduce((sum, order) => {
+      return sum + (order.payment?.amount || order.total || 0);
+    }, 0);
+
+    // Get this month's income
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthOrders = paidOrders.filter(order => 
+      new Date(order.createdAt) >= monthStart
+    );
+    const monthIncome = monthOrders.reduce((sum, order) => {
+      return sum + (order.payment?.amount || order.total || 0);
+    }, 0);
+
+    res.json({
+      success: true,
+      data: {
+        totalIncome,
+        todayIncome,
+        monthIncome,
+        totalOrders: paidOrders.length,
+        todayOrders: todayOrders.length,
+        monthOrders: monthOrders.length
+      }
+    });
+  } catch (error) {
+    console.error('Get income card error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch income data'
+    });
+  }
+};
+
+// Get product analytics for graphs (most purchased products)
+const getProductAnalytics = async (req, res) => {
+  try {
+    const { startDate, endDate, limit = 10 } = req.query;
+    
+    let dateFilter = {};
+    if (startDate || endDate) {
+      dateFilter.createdAt = {};
+      if (startDate) dateFilter.createdAt.gte = new Date(startDate);
+      if (endDate) dateFilter.createdAt.lte = new Date(endDate);
+    }
+
+    // Get all order items with product info
+    const orderItems = await prisma.orderItem.findMany({
+      where: {
+        order: {
+          ...dateFilter,
+          status: {
+            in: ['PAID_AND_APPROVED', 'IN_TRANSIT', 'DELIVERED']
+          }
+        }
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            category: true,
+            price: true
+          }
+        },
+        order: {
+          select: {
+            createdAt: true,
+            status: true
+          }
+        }
+      }
+    });
+
+    // Group by product and calculate totals
+    const productMap = new Map();
+    
+    orderItems.forEach(item => {
+      const productId = item.productId;
+      if (!productMap.has(productId)) {
+        productMap.set(productId, {
+          productId,
+          productName: item.product?.name || 'Unknown',
+          sku: item.product?.sku || '',
+          category: item.product?.category || 'Uncategorized',
+          totalQuantity: 0,
+          totalRevenue: 0,
+          orderCount: 0
+        });
+      }
+      
+      const productData = productMap.get(productId);
+      productData.totalQuantity += item.quantity;
+      productData.totalRevenue += item.subtotal;
+      productData.orderCount += 1;
+    });
+
+    // Convert to array and sort by revenue
+    const productAnalytics = Array.from(productMap.values())
+      .sort((a, b) => b.totalRevenue - a.totalRevenue)
+      .slice(0, parseInt(limit));
+
+    // Get category breakdown
+    const categoryMap = new Map();
+    orderItems.forEach(item => {
+      const category = item.product?.category || 'Uncategorized';
+      if (!categoryMap.has(category)) {
+        categoryMap.set(category, {
+          category,
+          totalQuantity: 0,
+          totalRevenue: 0,
+          productCount: 0
+        });
+      }
+      const catData = categoryMap.get(category);
+      catData.totalQuantity += item.quantity;
+      catData.totalRevenue += item.subtotal;
+    });
+
+    const categoryAnalytics = Array.from(categoryMap.values())
+      .sort((a, b) => b.totalRevenue - a.totalRevenue);
+
+    res.json({
+      success: true,
+      data: {
+        topProducts: productAnalytics,
+        categoryBreakdown: categoryAnalytics,
+        totalProducts: productMap.size,
+        totalCategories: categoryMap.size
+      }
+    });
+  } catch (error) {
+    console.error('Get product analytics error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch product analytics'
+    });
+  }
+};
+
+// Get active users count (managers and drivers)
+const getActiveUsers = async (req, res) => {
+  try {
+    const activeManagers = await prisma.user.count({
+      where: {
+        role: 'MANAGER',
+        isActive: true
+      }
+    });
+
+    const activeDrivers = await prisma.user.count({
+      where: {
+        role: 'DELIVERY_AGENT',
+        isActive: true
+      }
+    });
+
+    const totalManagers = await prisma.user.count({
+      where: { role: 'MANAGER' }
+    });
+
+    const totalDrivers = await prisma.user.count({
+      where: { role: 'DELIVERY_AGENT' }
+    });
+
+    const totalClients = await prisma.user.count({
+      where: { role: 'CLIENT' }
+    });
+
+    res.json({
+      success: true,
+      data: {
+        activeManagers,
+        activeDrivers,
+        totalManagers,
+        totalDrivers,
+        totalClients,
+        totalUsers: totalManagers + totalDrivers + totalClients
+      }
+    });
+  } catch (error) {
+    console.error('Get active users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch user statistics'
+    });
+  }
+};
+
+// Get order history with filters
+const getOrderHistory = async (req, res) => {
+  try {
+    const { startDate, endDate, status, limit = 50, page = 1 } = req.query;
+    
+    let whereClause = {};
+    
+    if (startDate || endDate) {
+      whereClause.createdAt = {};
+      if (startDate) whereClause.createdAt.gte = new Date(startDate);
+      if (endDate) whereClause.createdAt.lte = new Date(endDate);
+    }
+    
+    if (status) {
+      whereClause.status = status;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [orders, total] = await Promise.all([
+      prisma.order.findMany({
+        where: whereClause,
+        include: {
+          client: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone: true
+            }
+          },
+          manager: {
+            select: {
+              id: true,
+              name: true,
+              email: true
+            }
+          },
+          payment: {
+            select: {
+              id: true,
+              amount: true,
+              status: true,
+              method: true,
+              createdAt: true
+            }
+          },
+          delivery: {
+            select: {
+              id: true,
+              status: true,
+              agent: {
+                select: {
+                  id: true,
+                  name: true,
+                  phone: true
+                }
+              }
+            }
+          },
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  sku: true,
+                  category: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: parseInt(limit)
+      }),
+      prisma.order.count({ where: whereClause })
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        orders,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit))
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get order history error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch order history'
+    });
+  }
+};
+
 module.exports = {
   generateSystemReport,
   exportReportToCSV,
@@ -1566,5 +1909,9 @@ module.exports = {
   getQuoteStatistics,
   getAdminQuotes,
   getAdminQuoteStats,
-  getQuoteDetails
+  getQuoteDetails,
+  getIncomeCard,
+  getProductAnalytics,
+  getActiveUsers,
+  getOrderHistory
 };

@@ -69,6 +69,29 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// In your backend (Node.js/Express example)
+app.get('/api/managers/me', authenticateToken, async (req, res) => {
+  try {
+    const manager = await Manager.findById(req.user.userId);
+    if (!manager) {
+      return res.status(404).json({ success: false, message: 'Manager not found' });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        _id: manager._id, // MongoDB ObjectId
+        name: manager.name,
+        email: manager.email,
+        role: manager.role
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching manager:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Health & root
 app.get('/', (req, res) => {
   res.json({ success: true, message: 'NDAJE Backend Running — King KAHUNA Empire' });
@@ -92,7 +115,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/quotes', quoteRoutes);
 app.use('/api/deliveries', deliveryRoutes);
 app.use('/api/quotes/manager', managerRoutes);  
-app.use('/api/quotes', quoteRoutes);            
+app.use('/api/manager', managerRoutes);  // Add direct manager route for frontend compatibility
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/driver', driverRoutes);
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY

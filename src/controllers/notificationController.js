@@ -5,7 +5,7 @@ class NotificationController {
   // Get notifications for current user
   static async getNotifications(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user.userId || req.user.id;
       const notifications = await NotificationService.getUnreadNotifications(userId);
       
       res.json({
@@ -24,7 +24,7 @@ class NotificationController {
   // Get notification count
   static async getNotificationCount(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user.userId || req.user.id;
       const count = await NotificationService.getNotificationCount(userId);
       
       res.json({
@@ -44,7 +44,7 @@ class NotificationController {
   static async markAsRead(req, res) {
     try {
       const { id } = req.params;
-      const userId = req.user.id;
+      const userId = req.user.userId || req.user.id;
       
       const notification = await NotificationService.markAsRead(id, userId);
       
@@ -64,7 +64,7 @@ class NotificationController {
   // Mark all notifications as read
   static async markAllAsRead(req, res) {
     try {
-      const userId = req.user.id;
+      const userId = req.user.userId || req.user.id;
       
       await NotificationService.markAllAsRead(userId);
       

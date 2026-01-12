@@ -43,6 +43,10 @@ router.post('/quotes/cleanup', adminController.cleanupOrphanedQuotes);
 
 // ========== DASHBOARD & REPORTS ==========
 router.get('/dashboard/summary', adminController.getDashboardSummary);
+router.get('/dashboard/income', adminController.getIncomeCard);
+router.get('/dashboard/products', adminController.getProductAnalytics);
+router.get('/dashboard/users', adminController.getActiveUsers);
+router.get('/dashboard/orders', adminController.getOrderHistory);
 router.get('/reports/system', adminController.generateSystemReport);
 router.get('/reports/export/csv', adminController.exportReportToCSV);
 

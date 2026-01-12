@@ -1,6 +1,28 @@
 // controllers/managerController.js - 100% WORKING VERSION
 const prisma = require('../config/prisma');
 
+// Helper function to extract MongoDB ID from composite manager ID
+const extractManagerId = (userId) => {
+  if (!userId) return null;
+  
+  // If it's already a MongoDB ObjectId format (24 hex chars), return as is
+  if (typeof userId === 'string' && /^[0-9a-f]{24}$/i.test(userId)) {
+    return userId;
+  }
+  
+  // If it's a composite ID like "mgr_miaav9ez_f38f37fe1faa7ed7f20aea0529ea6222"
+  if (typeof userId === 'string' && userId.includes('_')) {
+    const parts = userId.split('_');
+    const lastPart = parts[parts.length - 1];
+    // Check if last part is a valid MongoDB ObjectId
+    if (/^[0-9a-f]{24}$/i.test(lastPart)) {
+      return lastPart;
+    }
+  }
+  
+  return userId;
+};
+
 // Helper function to safely fetch client data
 const getClientData = async (clientId) => {
   try {
@@ -34,9 +56,10 @@ const getClientData = async (clientId) => {
 const lockQuote = async (req, res) => {
   try {
     const { quoteId } = req.body;
-    const managerId = req.user?.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
     
-    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}`);
+    console.log(`🔒 Lock request: quoteId=${quoteId}, managerId=${managerId}, rawId=${req.user?.id}`);
     
     if (!quoteId) {
       return res.status(400).json({
@@ -141,9 +164,10 @@ const lockQuote = async (req, res) => {
 const deleteQuote = async (req, res) => {
   try {
     const { id } = req.params;
-    const managerId = req.user?.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
     
-    console.log(`🗑️ Delete request: quoteId=${id}, managerId=${managerId}`);
+    console.log(`🗑️ Delete request: quoteId=${id}, managerId=${managerId}, rawId=${req.user?.id}`);
     
     if (!id) {
       return res.status(400).json({
@@ -240,7 +264,8 @@ const deleteQuote = async (req, res) => {
 // ==================== GET AVAILABLE QUOTES ====================
 const getAvailableQuotes = async (req, res) => {
   try {
-    console.log('🔓 [getAvailableQuotes] Fetching');
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    console.log('🔓 [getAvailableQuotes] Fetching for manager:', managerId);
     
     const quotes = await prisma.quote.findMany({
       where: {
@@ -291,9 +316,10 @@ const getAvailableQuotes = async (req, res) => {
 // ==================== GET LOCKED QUOTES ====================
 const getLockedQuotes = async (req, res) => {
   try {
-    const managerId = req.user.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
     
-    console.log(`🔒 [getLockedQuotes] for manager: ${managerId}`);
+    console.log(`🔒 [getLockedQuotes] for manager: ${managerId}, rawId=${req.user?.id}`);
     
     const quotes = await prisma.quote.findMany({
       where: {
@@ -380,9 +406,10 @@ const getAwaitingApprovalQuotes = async (req, res) => {
 // ==================== GET MANAGER QUOTES ====================
 const getManagerQuotes = async (req, res) => {
   try {
-    const managerId = req.user.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
 
-    console.log(`📊 [getManagerQuotes] for manager: ${managerId}`);
+    console.log(`📊 [getManagerQuotes] for manager: ${managerId}, rawId=${req.user?.id}`);
 
     const quotes = await prisma.quote.findMany({
       where: {
@@ -435,9 +462,10 @@ const updatePricing = async (req, res) => {
   try {
     const { id } = req.params;
     const { items, sourcingNotes } = req.body;
-    const managerId = req.user?.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
 
-    console.log(`💰 Update pricing: quoteId=${id}`);
+    console.log(`💰 Update pricing: quoteId=${id}, managerId=${managerId}, rawId=${req.user?.id}`);
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -642,9 +670,78 @@ const priceAndApproveQuote = async (req, res) => {
 
 const getMyPricedOrders = async (req, res) => {
   try {
-    const managerId = req.user.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
     
-    const orders = await prisma.quote.findMany({
+    console.log(`📦 [getMyPricedOrders] for manager: ${managerId}, rawId=${req.user?.id}`);
+    
+    const orders = await prisma.order.findMany({
+      where: {
+        managerId: managerId,
+        status: {
+          in: ['PAID_AND_APPROVED', 'IN_TRANSIT', 'DELIVERED']
+        }
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                price: true
+              }
+            }
+          }
+        },
+        payment: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            method: true,
+            createdAt: true
+          }
+        },
+        delivery: {
+          select: {
+            id: true,
+            status: true,
+            agent: {
+              select: {
+                id: true,
+                name: true,
+                phone: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    res.json({ success: true, data: orders });
+  } catch (err) {
+    console.error('Get my priced orders error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch your orders' });
+  }
+};
+
+// Legacy function for quotes (keeping for backward compatibility)
+const getMyPricedQuotes = async (req, res) => {
+  try {
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
+    
+    const quotes = await prisma.quote.findMany({
       where: {
         managerId: managerId,
         OR: [
@@ -663,25 +760,26 @@ const getMyPricedOrders = async (req, res) => {
       orderBy: { updatedAt: 'desc' }
     });
 
-    const ordersWithClients = await Promise.all(
-      orders.map(async (order) => {
-        const client = await getClientData(order.clientId);
-        return { ...order, client };
+    const quotesWithClients = await Promise.all(
+      quotes.map(async (quote) => {
+        const client = await getClientData(quote.clientId);
+        return { ...quote, client };
       })
     );
 
-    res.json({ success: true, data: ordersWithClients });
+    res.json({ success: true, data: quotesWithClients });
   } catch (err) {
-    console.error('Get my priced orders error:', err);
-    res.status(500).json({ success: false, message: 'Failed to fetch your orders' });
+    console.error('Get my priced quotes error:', err);
+    res.status(500).json({ success: false, message: 'Failed to fetch your quotes' });
   }
 };
 
 const getManagerNotifications = async (req, res) => {
   try {
-    const managerId = req.user.id;
+    // Extract MongoDB ID from composite ID
+    const managerId = extractManagerId(req.user?.id || req.user?.userId);
     
-    console.log(`🔔 [getManagerNotifications] for manager: ${managerId}`);
+    console.log(`🔔 [getManagerNotifications] for manager: ${managerId}, rawId=${req.user?.id}`);
     
     const newQuotes = await prisma.quote.findMany({
       where: {

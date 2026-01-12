@@ -42,10 +42,22 @@ class NotificationService {
   
   static async markAsRead(notificationId, userId) {
     try {
-      const notification = await prisma.notification.update({
+      // First verify the notification belongs to the user
+      const notification = await prisma.notification.findFirst({
         where: {
           id: notificationId,
           userId: userId
+        }
+      });
+
+      if (!notification) {
+        throw new Error('Notification not found or access denied');
+      }
+
+      // Then update it
+      const updated = await prisma.notification.update({
+        where: {
+          id: notificationId
         },
         data: {
           read: true,
@@ -53,7 +65,7 @@ class NotificationService {
         }
       });
       
-      return notification;
+      return updated;
     } catch (error) {
       console.error('Mark as read error:', error);
       throw error;
