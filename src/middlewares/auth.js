@@ -101,35 +101,15 @@ const authenticateToken = async (req, res, next) => {
         message: 'User not found or inactive'
       });
     }
-    // ✅ CRITICAL FIX: Check if user has a manager record
-    let managerId = user.id; // Default to user ID
-    
-    if (user.role === 'MANAGER' && user.manager) {
-      // Use the manager table ID if exists
-      managerId = user.manager.id;
-    } else if (user.role === 'MANAGER') {
-      // For backward compatibility, create a manager record
-      try {
-        const manager = await prisma.manager.create({
-          data: {
-            userId: user.id,
-            name: user.name,
-            email: user.email,
-            isActive: true
-          }
-        });
-        managerId = manager.id;
-      } catch (error) {
-        console.log('Manager record already exists or error:', error);
-      }
-    }
+    // ✅ Manager ID for compatibility (use user.id directly; no manager table in Mongo schema)
+    const managerId = user.id;
 
     // ✅ Attach both IDs to request
     req.user = {
-      userId: user.id,           // Prisma user ID (SQL)
-      managerId: managerId,      // Manager-specific ID
-      id: managerId,             // For backward compatibility
-      firebaseUid: user.firebaseUid || null,
+      userId: user.id,               // Mongo ObjectId for user
+      managerId: managerId,          // Same as user id for manager role
+      id: managerId,                 // Backward compatibility for manager endpoints
+      firebaseUid: user.firebaseUid || null, // Keep firebase UID if present
       email: user.email,
       role: user.role,
       name: user.name
