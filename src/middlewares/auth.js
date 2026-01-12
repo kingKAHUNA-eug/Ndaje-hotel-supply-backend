@@ -41,10 +41,12 @@ const authenticateToken = async (req, res, next) => {
         message: 'Access token required'
       });
     }
+    
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     let user;
-  // Find user based on JWT payload
+    
+    // Find user based on JWT payload
     if (decoded.firebaseUid) {
       user = await prisma.user.findUnique({
         where: { firebaseUid: decoded.firebaseUid },
@@ -54,11 +56,7 @@ const authenticateToken = async (req, res, next) => {
           email: true, 
           role: true, 
           name: true, 
-          isActive: true,
-          // For managers, get the manager-specific ID if exists
-          manager: {
-            select: { id: true }
-          }
+          isActive: true
         }
       });
     } else if (decoded.email) {
@@ -70,10 +68,7 @@ const authenticateToken = async (req, res, next) => {
           email: true, 
           role: true, 
           name: true, 
-          isActive: true,
-          manager: {
-            select: { id: true }
-          }
+          isActive: true
         }
       });
     } else if (decoded.userId) {
@@ -85,14 +80,14 @@ const authenticateToken = async (req, res, next) => {
           email: true, 
           role: true, 
           name: true, 
-          isActive: true,
-          manager: {
-            select: { id: true }
-          }
+          isActive: true
         }
       });
     } else {
-      return res.status(401).json({ success: false, message: 'Invalid token payload' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token payload' 
+      });
     }
 
     if (!user || !user.isActive) {
@@ -101,15 +96,16 @@ const authenticateToken = async (req, res, next) => {
         message: 'User not found or inactive'
       });
     }
-    // ✅ Manager ID for compatibility (use user.id directly; no manager table in Mongo schema)
+    
+    // ✅ For managers, user.id IS the manager ID (no separate manager table)
     const managerId = user.id;
 
-    // ✅ Attach both IDs to request
+    // ✅ Attach user info to request
     req.user = {
-      userId: user.id,               // Mongo ObjectId for user
-      managerId: managerId,          // Same as user id for manager role
-      id: managerId,                 // Backward compatibility for manager endpoints
-      firebaseUid: user.firebaseUid || null, // Keep firebase UID if present
+      userId: user.id,               // MongoDB ObjectId as string
+      managerId: managerId,          // Same as userId for MANAGER role
+      id: managerId,                 // Backward compatibility
+      firebaseUid: user.firebaseUid || null,
       email: user.email,
       role: user.role,
       name: user.name
@@ -119,20 +115,31 @@ const authenticateToken = async (req, res, next) => {
       userId: user.id,
       managerId: managerId,
       role: user.role,
-      name: user.name
+      name: user.name,
+      email: user.email
     });
 
     next();
   
- } catch (error) {
+  } catch (error) {
     if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ success: false, message: 'Invalid token' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid token' 
+      });
     }
     if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ success: false, message: 'Token expired' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Token expired' 
+      });
     }
-    console.error('Auth middleware error:', error);
-    return res.status(500).json({ success: false, message: 'Authentication failed' });
+    console.error('❌ Auth middleware error:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Authentication failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
@@ -152,4 +159,4 @@ module.exports = {
   requireClient,
   requireStaff,
   authorize
-}
+};
