@@ -115,16 +115,20 @@ router.post('/google', async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // FIXED: Add 'data' wrapper to match frontend expectations
     res.json({
       success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar,
-      },
+      data: {  // Add this wrapper
+        token,
+        user: {
+          id: user.id,
+          firebaseUid: user.firebaseUid,  // Add this
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          avatar: user.avatar,
+        }
+      }
     });
   } catch (err) {
     console.error('Google Auth Error:', err);
