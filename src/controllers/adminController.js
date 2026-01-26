@@ -8,6 +8,7 @@ const jwt = require('jsonwebtoken');
 const cloudinary = require('cloudinary').v2;
 const admin = require('firebase-admin');
 const { prisma } = require('../index');
+const ActivityService = require('../services/activityService');
 
 
 // Configure Cloudinary
@@ -1882,7 +1883,476 @@ const getOrderHistory = async (req, res) => {
     });
   }
 };
+/**
+ * Get dashboard statistics with time range
+ */
+const getDashboardStats = async (req, res) => {
+  try {
+    const { range = 'week' } = req.query;
+    const startDate = getDateRange(range);
+    
+    // Calculate all statistics in parallel
+     const [
+      totalRevenueResult,
+      totalQuotesCount,
+      activeQuotesCount,
+      completedQuotesCount,
+      totalClientsCount,
+      newClientsThisMonthCount,
+      averageQuoteValueResult,
+      approvedQuotesCount,
+      totalOrdersCount
+    ] = await Promise.all([
+      // Total revenue from orders within date range
+      prisma.order.aggregate({
+        where: { 
+          createdAt: { gte: startDate }, 
+          status: 'DELIVERED'
+        },
+        _sum: { totalAmount: true }
+      }),
+      
+      // Count total quotes within date range
+      prisma.quote.count({
+        where: { createdAt: { gte: startDate } }
+      }),
+      
+      // Count active quotes (in progress)
+      prisma.quote.count({
+        where: { 
+          status: { 
+            in: ['IN_PRICING', 'PENDING_PRICING', 'AWAITING_CLIENT_APPROVAL'] 
+          } 
+        }
+      }),
+      
+      // Count completed quotes (approved)
+      prisma.quote.count({
+        where: { status: 'APPROVED' }
+      }),
+      
+      // Count total unique clients
+      prisma.user.count({
+        where: { role: 'CLIENT' }
+      }),
+      
+      // Count new clients this month
+      prisma.user.count({
+        where: { 
+          role: 'CLIENT',
+          createdAt: { 
+            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) 
+          } 
+        }
+      }),
+      
+      // Calculate average quote value
+      prisma.quote.aggregate({
+        where: { totalAmount: { gt: 0 } },
+        _avg: { totalAmount: true }
+      }),
+      
+      // Count approved quotes for conversion rate
+      prisma.quote.count({
+        where: { status: 'APPROVED' }
+      }),
+      
+      // Count total orders for conversion rate
+      prisma.order.count()
+    ]);
+    
+    // Calculate conversion rate
+    const conversionRate = totalQuotesCount > 0 
+      ? Math.round((approvedQuotesCount / totalQuotesCount) * 100)
+      : 0;
+    
+    res.json({
+      success: true,
+      data: {
+        totalRevenue: totalRevenueResult._sum.totalAmount || 0,
+        totalQuotes: totalQuotesCount || 0,
+        activeQuotes: activeQuotesCount || 0,
+        completedQuotes: completedQuotesCount || 0,
+        totalClients: totalClientsCount || 0,
+        newClientsThisMonth: newClientsThisMonthCount || 0,
+        averageQuoteValue: averageQuoteValueResult._avg.totalAmount || 0,
+        conversionRate: conversionRate
+      }
+    });
+  } catch (error) {
+    console.error('Get dashboard stats error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to fetch dashboard statistics' 
+    });
+  }
+};
 
+/**
+ * Get recent quotes for dashboard
+ */
+const getRecentQuotes = async (req, res) => {
+  try {
+    const { limit = 5 } = req.query;
+    
+    const quotes = await prisma.quote.findMany({
+      take: parseInt(limit),
+      orderBy: { createdAt: 'desc' },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        manager: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      },
+      select: {
+        id: true,
+        totalAmount: true,
+        status: true,
+        createdAt: true
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: quotes
+    });
+  } catch (error) {
+    console.error('Get recent quotes error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to fetch recent quotes' 
+    });
+  }
+};
+
+/**
+ * Get top performing managers
+ */
+const getTopManagers = async (req, res) => {
+  try {
+    // Get all quotes grouped by manager
+    const managerQuotes = await prisma.quote.groupBy({
+      by: ['managerId'],
+      where: {
+        managerId: { not: null }
+      },
+      _count: { id: true },
+      _sum: { totalAmount: true }
+    });
+    
+    // Get manager details for each
+    const managerIds = managerQuotes.map(mq => mq.managerId);
+    const managers = await prisma.user.findMany({
+      where: {
+        id: { in: managerIds },
+        role: 'MANAGER'
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true
+      }
+    });
+    
+    // Calculate conversion rates (simplified - need more data for actual conversion)
+    const topManagers = managerQuotes.map(mq => {
+      const manager = managers.find(m => m.id === mq.managerId);
+      
+      // For now, using a simplified conversion rate calculation
+      // You might want to add more logic here based on approved quotes
+      const totalQuotes = mq._count.id;
+      const approvedQuotes = Math.floor(totalQuotes * 0.7); // Placeholder
+      const conversionRate = totalQuotes > 0 
+        ? Math.round((approvedQuotes / totalQuotes) * 100)
+        : 0;
+      
+      return {
+        id: mq.managerId,
+        name: manager ? manager.name : 'Unknown',
+        email: manager ? manager.email : '',
+        quotesCompleted: totalQuotes,
+        revenueGenerated: mq._sum.totalAmount || 0,
+        conversionRate: conversionRate
+      };
+    });
+    
+    // Sort by revenue generated
+    topManagers.sort((a, b) => b.revenueGenerated - a.revenueGenerated);
+    
+    res.json({
+      success: true,
+      data: topManagers.slice(0, 5) // Return top 5
+    });
+  } catch (error) {
+    console.error('Get top managers error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to fetch top managers' 
+    });
+  }
+};
+
+/**
+ * Get revenue trend data
+ */
+const getRevenueTrend = async (req, res) => {
+  try {
+    const { range = 'week' } = req.query;
+    const startDate = getDateRange(range);
+    
+    // Get daily revenue for the last 7 days
+    const trendData = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = date.toISOString().split('T')[0];
+      
+      // Get orders for this day
+      const dayStart = new Date(date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(date);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      const dayOrders = await prisma.order.aggregate({
+        where: {
+          createdAt: { gte: dayStart, lte: dayEnd },
+          status: 'DELIVERED'
+        },
+        _sum: { totalAmount: true },
+        _count: { id: true }
+      });
+      
+      // Get quotes for this day
+      const dayQuotes = await prisma.quote.aggregate({
+        where: {
+          createdAt: { gte: dayStart, lte: dayEnd }
+        },
+        _sum: { totalAmount: true }
+      });
+      
+      trendData.push({
+        date: dateStr,
+        label: getDayLabel(date),
+        orderRevenue: dayOrders._sum.totalAmount || 0,
+        orderCount: dayOrders._count.id || 0,
+        quoteRevenue: dayQuotes._sum.totalAmount || 0,
+        type: 'daily'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: trendData
+    });
+  } catch (error) {
+    console.error('Get revenue trend error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to fetch revenue trend' 
+    });
+  }
+};
+
+/**
+ * Get recent activity logs
+ * Note: You'll need to create an Activity model to log system activities
+ */
+const getRecentActivity = async (req, res) => {
+  try {
+    // For now, we'll return placeholder data
+    // You should create an Activity model to track these events
+    const placeholderActivities = [
+      {
+        type: 'quote',
+        description: 'New quote created by John Doe',
+        timestamp: new Date(Date.now() - 1000 * 60 * 30)
+      },
+      {
+        type: 'order',
+        description: 'Order #12345 delivered successfully',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2)
+      },
+      {
+        type: 'user',
+        description: 'New manager account created',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5)
+      },
+      {
+        type: 'quote',
+        description: 'Quote approved by client',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 8)
+      },
+      {
+        type: 'order',
+        description: 'Payment received for Order #12344',
+        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 12)
+      }
+    ];
+    
+    res.json({
+      success: true,
+      data: placeholderActivities
+    });
+    
+    
+    
+    const activities = await prisma.activity.findMany({
+      take: 10,
+      orderBy: { timestamp: 'desc' },
+      select: {
+        type: true,
+        description: true,
+        timestamp: true
+      }
+    });
+    
+    res.json({
+      success: true,
+      data: activities
+    });
+    
+  } catch (error) {
+    console.error('Get recent activity error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to fetch recent activity' 
+    });
+  }
+};
+
+/**
+ * Export data in CSV format
+ */
+const exportData = async (req, res) => {
+  try {
+    const { type } = req.params;
+    
+    switch (type) {
+      case 'quotes':
+        const quotes = await prisma.quote.findMany({
+          include: {
+            client: {
+              select: { name: true, email: true }
+            },
+            manager: {
+              select: { name: true }
+            }
+          }
+        });
+        
+        // Convert to CSV
+        const csvQuotes = convertToCSV(quotes);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=quotes_export.csv');
+        return res.send(csvQuotes);
+        
+      case 'orders':
+        const orders = await prisma.order.findMany({
+          include: {
+            client: {
+              select: { name: true, email: true }
+            }
+          }
+        });
+        
+        const csvOrders = convertToCSV(orders);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=orders_export.csv');
+        return res.send(csvOrders);
+        
+      case 'reports':
+        // Generate comprehensive report
+        const report = await generateSystemReport(req);
+        const csvReport = convertToCSV(report.data);
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=full_report.csv');
+        return res.send(csvReport);
+        
+      default:
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid export type. Use: quotes, orders, or reports'
+        });
+    }
+  } catch (error) {
+    console.error('Export data error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to export data' 
+    });
+  }
+};
+
+// Helper function to get date range
+function getDateRange(range) {
+  const now = new Date();
+  switch (range) {
+    case 'day':
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    case 'week':
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    case 'month':
+      return new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    case 'quarter':
+      return new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+    default:
+      return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+}
+
+// Helper function to get day label
+function getDayLabel(date) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  return days[date.getDay()];
+}
+
+// Helper function to convert data to CSV
+function convertToCSV(data) {
+  if (!data || data.length === 0) return '';
+  
+  // Extract headers from first object
+  const headers = Object.keys(data[0]);
+  const csvRows = [];
+  
+  // Add headers
+  csvRows.push(headers.join(','));
+  
+  // Add data rows
+  for (const row of data) {
+    const values = headers.map(header => {
+      const value = row[header];
+      
+      // Handle dates
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+      
+      // Handle nested objects
+      if (typeof value === 'object' && value !== null) {
+        return JSON.stringify(value).replace(/,/g, ';');
+      }
+      
+      // Handle strings with commas
+      if (typeof value === 'string' && value.includes(',')) {
+        return `"${value}"`;
+      }
+      
+      return value;
+    });
+    csvRows.push(values.join(','));
+  }
+  
+  return csvRows.join('\n');
+}
 module.exports = {
   generateSystemReport,
   exportReportToCSV,
@@ -1913,5 +2383,11 @@ module.exports = {
   getIncomeCard,
   getProductAnalytics,
   getActiveUsers,
-  getOrderHistory
+  getOrderHistory,
+  getDashboardStats,
+  getRecentQuotes,
+  getTopManagers,
+  getRevenueTrend,
+  getRecentActivity,
+  exportData,
 };

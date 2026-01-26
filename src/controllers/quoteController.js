@@ -1,8 +1,9 @@
 const { z } = require('zod');
 const QuoteService = require('../services/quoteService');
 const prisma = require('../config/prisma');
+const ActivityService = require('../services/activityService');
 
-// Validation schemas
+// Validation schemas (keep your existing schemas)
 const createEmptyQuoteSchema = z.object({
   notes: z.string().optional()
 });
@@ -60,6 +61,9 @@ const createEmptyQuote = async (req, res) => {
 
     const quote = await QuoteService.createEmptyQuote(clientId, notes);
 
+    // Log activity
+    await ActivityService.logQuoteCreated(quote.id, clientId, req.user.userId);
+
     res.status(201).json({
       success: true,
       message: 'Quote created',
@@ -70,7 +74,7 @@ const createEmptyQuote = async (req, res) => {
   }
 };
 
-// Client adds items to quote
+// Client adds items to quote - ADD ACTIVITY LOGGING
 const addQuoteItems = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -78,6 +82,14 @@ const addQuoteItems = async (req, res) => {
     const { items } = addQuoteItemsSchema.parse(req.body);
 
     const quote = await QuoteService.addItemsToQuote(quoteId, clientId, items);
+
+    // Log activity
+    await ActivityService.logActivity({
+      type: 'quote',
+      description: `Added ${items.length} items to quote #${quoteId.slice(-8)}`,
+      userId: clientId,
+      metadata: { quoteId, itemCount: items.length }
+    });
 
     res.status(200).json({
       success: true,
@@ -98,7 +110,7 @@ const addQuoteItems = async (req, res) => {
   }
 };
 
-// Manager updates pricing
+// Manager updates pricing - ENHANCED WITH ACTIVITY LOGGING
 const updateQuoteItems = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -209,6 +221,28 @@ const updateQuoteItems = async (req, res) => {
     
     console.log('✅ Quote pricing updated:', quoteId);
     
+    // Log activity for pricing update
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'IN_PRICING',
+      'AWAITING_CLIENT_APPROVAL',
+      req.user.userId
+    );
+    
+    // Log detailed pricing activity
+    await ActivityService.logActivity({
+      type: 'quote',
+      description: `Manager priced quote #${quoteId.slice(-8)} for RWF ${totalAmount.toLocaleString()}`,
+      userId: req.user.userId,
+      metadata: { 
+        quoteId, 
+        totalAmount, 
+        itemCount: items.length,
+        oldStatus: 'IN_PRICING',
+        newStatus: 'AWAITING_CLIENT_APPROVAL'
+      }
+    });
+    
     res.status(200).json({
       success: true,
       message: 'Quote pricing updated',
@@ -236,13 +270,21 @@ const updateQuoteItems = async (req, res) => {
   }
 };
 
-// Client finalizes quote (sends to manager)
+// Client finalizes quote (sends to manager) - ADD ACTIVITY LOGGING
 const finalizeQuote = async (req, res) => {
   try {
     const { quoteId } = req.params;
     const clientId = req.user.userId;
 
     const quote = await QuoteService.submitQuoteToManager(quoteId, clientId);
+
+    // Log activity
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'DRAFT',
+      'PENDING_PRICING',
+      clientId
+    );
 
     res.status(200).json({
       success: true,
@@ -254,13 +296,21 @@ const finalizeQuote = async (req, res) => {
   }
 };
 
-// Client approves quote
+// Client approves quote - ENHANCED WITH ACTIVITY LOGGING
 const approveQuote = async (req, res) => {
   try {
     const { quoteId } = req.params.quoteId ? { quoteId: req.params.quoteId } : approveQuoteSchema.parse(req.body);
     const clientId = req.user.userId;
 
     const quote = await QuoteService.approveQuote(quoteId, clientId);
+
+    // Log activity
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'AWAITING_CLIENT_APPROVAL',
+      'APPROVED',
+      clientId
+    );
 
     res.status(200).json({
       success: true,
@@ -272,13 +322,21 @@ const approveQuote = async (req, res) => {
   }
 };
 
-// Client rejects quote
+// Client rejects quote - ADD ACTIVITY LOGGING
 const rejectQuote = async (req, res) => {
   try {
     const { quoteId, reason } = rejectQuoteSchema.parse(req.body);
     const clientId = req.user.userId;
 
     const quote = await QuoteService.rejectQuote(quoteId, clientId, reason);
+
+    // Log activity
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'AWAITING_CLIENT_APPROVAL',
+      'REJECTED',
+      clientId
+    );
 
     res.status(200).json({
       success: true,
@@ -290,7 +348,7 @@ const rejectQuote = async (req, res) => {
   }
 };
 
-// Client converts quote to order
+// Client converts quote to order - ADD ACTIVITY LOGGING
 const convertQuoteToOrder = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -298,6 +356,27 @@ const convertQuoteToOrder = async (req, res) => {
     const { addressId, paymentMethod } = req.body;
 
     const order = await QuoteService.convertToOrder(quoteId, clientId, addressId, paymentMethod);
+
+    // Log activity for conversion
+    await ActivityService.logActivity({
+      type: 'order',
+      description: `Quote #${quoteId.slice(-8)} converted to order #${order.id.slice(-8)}`,
+      userId: clientId,
+      metadata: { 
+        quoteId, 
+        orderId: order.id, 
+        totalAmount: order.totalAmount,
+        addressId 
+      }
+    });
+
+    // Log quote status change
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'APPROVED',
+      'CONVERTED_TO_ORDER',
+      clientId
+    );
 
     res.status(201).json({
       success: true,
@@ -325,7 +404,7 @@ const getQuoteById = async (req, res) => {
   }
 };
 
-// Get manager quotes - UPDATED
+// Get manager quotes - UPDATED WITH ACTIVITY LOGGING
 const getManagerQuotes = async (req, res) => {
   try {
     const managerId = extractManagerId(req.user.id || req.user.userId);
@@ -368,7 +447,7 @@ const getClientQuotes = async (req, res) => {
   }
 };
 
-// Lock quote for pricing - UPDATED
+// Lock quote for pricing - ENHANCED WITH ACTIVITY LOGGING
 const lockQuoteForPricing = async (req, res) => {
   try {
     const { quoteId } = lockQuoteSchema.parse(req.body);
@@ -464,6 +543,26 @@ const lockQuoteForPricing = async (req, res) => {
       lockExpiresAt: updatedQuote.lockExpiresAt
     });
     
+    // Log activity for locking
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'PENDING_PRICING',
+      'IN_PRICING',
+      req.user.userId
+    );
+    
+    // Log detailed lock activity
+    await ActivityService.logActivity({
+      type: 'quote',
+      description: `Manager ${req.user.name} locked quote #${quoteId.slice(-8)} for pricing until ${lockExpiresAt.toLocaleTimeString()}`,
+      userId: req.user.userId,
+      metadata: { 
+        quoteId, 
+        lockExpiresAt,
+        managerName: req.user.name 
+      }
+    });
+    
     return res.json({
       success: true,
       message: 'Quote locked successfully',
@@ -495,7 +594,7 @@ const lockQuoteForPricing = async (req, res) => {
   }
 };
 
-// Manager releases quote lock - UPDATED
+// Manager releases quote lock - ADD ACTIVITY LOGGING
 const releaseQuoteLock = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -522,7 +621,7 @@ const releaseQuoteLock = async (req, res) => {
     }
     
     // Release the lock
-    await prisma.quote.update({
+    const updatedQuote = await prisma.quote.update({
       where: { id: quoteId },
       data: {
         lockedById: null,
@@ -532,9 +631,25 @@ const releaseQuoteLock = async (req, res) => {
       }
     });
 
+    // Log activity
+    await ActivityService.logQuoteStatusChange(
+      quoteId,
+      'IN_PRICING',
+      'PENDING_PRICING',
+      req.user.userId
+    );
+
+    await ActivityService.logActivity({
+      type: 'quote',
+      description: `Manager released lock on quote #${quoteId.slice(-8)}`,
+      userId: req.user.userId,
+      metadata: { quoteId }
+    });
+
     res.status(200).json({
       success: true,
-      message: 'Quote lock released'
+      message: 'Quote lock released',
+      data: { quote: updatedQuote }
     });
   } catch (error) {
     let statusCode = 500;
@@ -860,7 +975,7 @@ const debugDatabase = async (req, res) => {
   }
 };
 
-// Delete quote by manager - UPDATED
+// Delete quote by manager - ENHANCED WITH ACTIVITY LOGGING
 const deleteQuoteByManager = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -881,7 +996,12 @@ const deleteQuoteByManager = async (req, res) => {
     
     // Check if quote exists
     const quote = await prisma.quote.findUnique({
-      where: { id: quoteId }
+      where: { id: quoteId },
+      include: {
+        client: {
+          select: { name: true, email: true }
+        }
+      }
     });
     
     if (!quote) {
@@ -937,6 +1057,21 @@ const deleteQuoteByManager = async (req, res) => {
     
     console.log(`✅ Quote deleted successfully: ${quoteId}`);
     
+    // Log activity for deletion
+    await ActivityService.logActivity({
+      type: 'quote',
+      description: `Quote #${quoteId.slice(-8)} deleted by ${req.user.role} (${req.user.name})`,
+      userId: req.user.userId,
+      metadata: { 
+        quoteId, 
+        deletedBy: req.user.role,
+        deletedByName: req.user.name,
+        clientName: quote.client?.name,
+        quoteStatus: quote.status,
+        totalAmount: quote.totalAmount
+      }
+    });
+
     return res.json({
       success: true,
       message: 'Quote deleted successfully'
@@ -987,5 +1122,5 @@ module.exports = {
   getQuotesAwaitingApproval,
   debugDatabase,
   deleteQuoteByManager,
-  extractManagerId // Export if needed elsewhere
+  extractManagerId
 };

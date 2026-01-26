@@ -2,12 +2,12 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const { authenticateToken, requireAdmin } = require('../middlewares/auth');
-const adminController = require('../controllers/adminController'); // IMPORT THE CONTROLLER
+const adminController = require('../controllers/adminController');
 
 // Configure multer for memory storage
 const upload = multer({ 
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
@@ -21,7 +21,7 @@ const upload = multer({
 router.use(authenticateToken);
 router.use(requireAdmin);
 
-// ========== EXISTING ROUTES (KEEP THEM) ==========
+// ========== EXISTING ROUTES ==========
 router.get('/test-cloudinary', adminController.testCloudinaryConfig);
 router.get('/managers', adminController.getAllManagers);
 router.get('/drivers', adminController.getAllDrivers);
@@ -41,7 +41,21 @@ router.get('/quotes/statistics', adminController.getQuoteStatistics);
 router.get('/quotes/orphaned', adminController.viewOrphanedQuotes);
 router.post('/quotes/cleanup', adminController.cleanupOrphanedQuotes);
 
-// ========== DASHBOARD & REPORTS ==========
+// ========== ENHANCED DASHBOARD ENDPOINTS ==========
+// Dashboard stats with time range
+router.get('/dashboard/stats', adminController.getDashboardStats);
+// Recent quotes for dashboard
+router.get('/quotes/recent', adminController.getRecentQuotes);
+// Top performing managers
+router.get('/managers/top-performance', adminController.getTopManagers);
+// Revenue trend data
+router.get('/revenue/trend', adminController.getRevenueTrend);
+// Recent activity logs
+router.get('/activity/recent', adminController.getRecentActivity);
+// Export data in CSV format
+router.get('/export/:type', adminController.exportData);
+
+// ========== EXISTING DASHBOARD ROUTES ==========
 router.get('/dashboard/summary', adminController.getDashboardSummary);
 router.get('/dashboard/income', adminController.getIncomeCard);
 router.get('/dashboard/products', adminController.getProductAnalytics);
