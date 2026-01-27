@@ -1883,348 +1883,444 @@ const getOrderHistory = async (req, res) => {
     });
   }
 };
-/**
- * Get dashboard statistics with time range
- */
+// ============================================
+// FIX 1: Get Dashboard Stats
+// ============================================
 const getDashboardStats = async (req, res) => {
   try {
     const { range = 'week' } = req.query;
-    const startDate = getDateRange(range);
     
-    // Calculate all statistics in parallel
-     const [
-      totalRevenueResult,
+    // Calculate date range
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch (range) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      default:
+        startDate.setDate(now.getDate() - 7);
+    }
+
+    console.log('📊 Fetching dashboard stats for range:', range, 'from', startDate.toISOString());
+
+    // Execute all queries in parallel
+    const [
+      orderRevenue,
+      quoteRevenue,
       totalQuotesCount,
       activeQuotesCount,
       completedQuotesCount,
       totalClientsCount,
-      newClientsThisMonthCount,
-      averageQuoteValueResult,
-      approvedQuotesCount,
-      totalOrdersCount
+      newClientsCount
     ] = await Promise.all([
-      // Total revenue from orders within date range
+      // ✅ FIXED: Use _sum instead of select for aggregate
       prisma.order.aggregate({
-        where: { 
-          createdAt: { gte: startDate }, 
-          status: 'DELIVERED'
+        where: {
+          createdAt: {
+            gte: startDate
+          }
         },
-        _sum: { totalAmount: true }
-      }),
-      
-      // Count total quotes within date range
-      prisma.quote.count({
-        where: { createdAt: { gte: startDate } }
-      }),
-      
-      // Count active quotes (in progress)
-      prisma.quote.count({
-        where: { 
-          status: { 
-            in: ['IN_PRICING', 'PENDING_PRICING', 'AWAITING_CLIENT_APPROVAL'] 
-          } 
+        _sum: {
+          totalAmount: true
         }
       }),
       
-      // Count completed quotes (approved)
-      prisma.quote.count({
-        where: { status: 'APPROVED' }
-      }),
-      
-      // Count total unique clients
-      prisma.user.count({
-        where: { role: 'CLIENT' }
-      }),
-      
-      // Count new clients this month
-      prisma.user.count({
-        where: { 
-          role: 'CLIENT',
-          createdAt: { 
-            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1) 
-          } 
-        }
-      }),
-      
-      // Calculate average quote value
+      // ✅ FIXED: Use _sum for quote aggregate
       prisma.quote.aggregate({
-        where: { totalAmount: { gt: 0 } },
-        _avg: { totalAmount: true }
+        where: {
+          createdAt: {
+            gte: startDate
+          },
+          status: 'APPROVED'
+        },
+        _sum: {
+          totalAmount: true
+        }
       }),
       
-      // Count approved quotes for conversion rate
+      // Total quotes
       prisma.quote.count({
-        where: { status: 'APPROVED' }
+        where: {
+          createdAt: {
+            gte: startDate
+          }
+        }
       }),
       
-      // Count total orders for conversion rate
-      prisma.order.count()
+      // Active quotes (being priced or awaiting approval)
+      prisma.quote.count({
+        where: {
+          status: {
+            in: ['PENDING_PRICING', 'IN_PRICING', 'AWAITING_CLIENT_APPROVAL']
+          }
+        }
+      }),
+      
+      // Completed quotes
+      prisma.quote.count({
+        where: {
+          status: {
+            in: ['APPROVED', 'CONVERTED_TO_ORDER']
+          },
+          createdAt: {
+            gte: startDate
+          }
+        }
+      }),
+      
+      // Total clients
+      prisma.client.count(),
+      
+      // New clients in range
+      prisma.client.count({
+        where: {
+          createdAt: {
+            gte: startDate
+          }
+        }
+      })
     ]);
-    
-    // Calculate conversion rate
-    const conversionRate = totalQuotesCount > 0 
-      ? Math.round((approvedQuotesCount / totalQuotesCount) * 100)
+
+    // ✅ FIXED: Safely access _sum results
+    const totalRevenue = (orderRevenue._sum.totalAmount || 0) + (quoteRevenue._sum.totalAmount || 0);
+    const averageQuoteValue = totalQuotesCount > 0 
+      ? (quoteRevenue._sum.totalAmount || 0) / totalQuotesCount 
       : 0;
-    
-    res.json({
+    const conversionRate = totalQuotesCount > 0 
+      ? ((completedQuotesCount / totalQuotesCount) * 100).toFixed(1)
+      : 0;
+
+    const stats = {
+      totalRevenue: Math.round(totalRevenue),
+      totalQuotes: totalQuotesCount,
+      activeQuotes: activeQuotesCount,
+      completedQuotes: completedQuotesCount,
+      conversionRate: parseFloat(conversionRate),
+      averageQuoteValue: Math.round(averageQuoteValue),
+      totalClients: totalClientsCount,
+      newClientsThisMonth: newClientsCount
+    };
+
+    console.log('✅ Dashboard stats calculated:', stats);
+
+    return res.json({
       success: true,
-      data: {
-        totalRevenue: totalRevenueResult._sum.totalAmount || 0,
-        totalQuotes: totalQuotesCount || 0,
-        activeQuotes: activeQuotesCount || 0,
-        completedQuotes: completedQuotesCount || 0,
-        totalClients: totalClientsCount || 0,
-        newClientsThisMonth: newClientsThisMonthCount || 0,
-        averageQuoteValue: averageQuoteValueResult._avg.totalAmount || 0,
-        conversionRate: conversionRate
-      }
+      data: stats
     });
+
   } catch (error) {
-    console.error('Get dashboard stats error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Failed to fetch dashboard statistics' 
+    console.error('❌ Get dashboard stats error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch dashboard statistics',
+      error: error.message
     });
   }
 };
 
-/**
- * Get recent quotes for dashboard
- */
+// ============================================
+// FIX 2: Get Recent Quotes
+// ============================================
 const getRecentQuotes = async (req, res) => {
   try {
-    const { limit = 5 } = req.query;
-    
+    const limit = parseInt(req.query.limit) || 5;
+
+    console.log('📋 Fetching recent quotes, limit:', limit);
+
     const quotes = await prisma.quote.findMany({
-      take: parseInt(limit),
-      orderBy: { createdAt: 'desc' },
+      take: limit,
+      orderBy: {
+        createdAt: 'desc'
+      },
       include: {
         client: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true
+          }
+        },
+        manager: {
           select: {
             id: true,
             name: true,
             email: true
           }
         },
-        manager: {
-          select: {
-            id: true,
-            name: true
+        items: {
+          include: {
+            product: {
+              select: {
+                id: true,
+                name: true,
+                sku: true,
+                price: true
+              }
+            }
           }
         }
-      },
-      select: {
-        id: true,
-        totalAmount: true,
-        status: true,
-        createdAt: true
       }
     });
-    
-    res.json({
+
+    console.log('✅ Found', quotes.length, 'recent quotes');
+
+    return res.json({
       success: true,
       data: quotes
     });
+
   } catch (error) {
-    console.error('Get recent quotes error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Failed to fetch recent quotes' 
+    console.error('❌ Get recent quotes error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent quotes',
+      error: error.message
     });
   }
 };
 
-/**
- * Get top performing managers
- */
+// ============================================
+// FIX 3: Get Top Performing Managers
+// ============================================
 const getTopManagers = async (req, res) => {
   try {
-    // Get all quotes grouped by manager
-    const managerQuotes = await prisma.quote.groupBy({
-      by: ['managerId'],
-      where: {
-        managerId: { not: null }
-      },
-      _count: { id: true },
-      _sum: { totalAmount: true }
-    });
-    
-    // Get manager details for each
-    const managerIds = managerQuotes.map(mq => mq.managerId);
-    const managers = await prisma.user.findMany({
-      where: {
-        id: { in: managerIds },
-        role: 'MANAGER'
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true
+    console.log('👥 Fetching top performing managers');
+
+    // Get all managers with their quote data
+    const managers = await prisma.manager.findMany({
+      include: {
+        quotes: {
+          where: {
+            status: {
+              in: ['APPROVED', 'CONVERTED_TO_ORDER', 'AWAITING_CLIENT_APPROVAL']
+            }
+          },
+          select: {
+            id: true,
+            totalAmount: true,
+            status: true
+          }
+        }
       }
     });
-    
-    // Calculate conversion rates (simplified - need more data for actual conversion)
-    const topManagers = managerQuotes.map(mq => {
-      const manager = managers.find(m => m.id === mq.managerId);
-      
-      // For now, using a simplified conversion rate calculation
-      // You might want to add more logic here based on approved quotes
-      const totalQuotes = mq._count.id;
-      const approvedQuotes = Math.floor(totalQuotes * 0.7); // Placeholder
+
+    // Calculate performance metrics for each manager
+    const managersWithMetrics = managers.map(manager => {
+      const totalQuotes = manager.quotes.length;
+      const revenueGenerated = manager.quotes.reduce((sum, quote) => 
+        sum + (quote.totalAmount || 0), 0
+      );
+      const approvedQuotes = manager.quotes.filter(q => 
+        q.status === 'APPROVED' || q.status === 'CONVERTED_TO_ORDER'
+      ).length;
       const conversionRate = totalQuotes > 0 
         ? Math.round((approvedQuotes / totalQuotes) * 100)
         : 0;
-      
+
       return {
-        id: mq.managerId,
-        name: manager ? manager.name : 'Unknown',
-        email: manager ? manager.email : '',
-        quotesCompleted: totalQuotes,
-        revenueGenerated: mq._sum.totalAmount || 0,
-        conversionRate: conversionRate
+        id: manager.id,
+        name: manager.name,
+        email: manager.email,
+        revenueGenerated,
+        quotesCompleted: approvedQuotes,
+        totalQuotes,
+        conversionRate
       };
     });
-    
-    // Sort by revenue generated
-    topManagers.sort((a, b) => b.revenueGenerated - a.revenueGenerated);
-    
-    res.json({
+
+    // Sort by revenue and take top 5
+    const topManagers = managersWithMetrics
+      .sort((a, b) => b.revenueGenerated - a.revenueGenerated)
+      .slice(0, 5);
+
+    console.log('✅ Top managers calculated:', topManagers.length);
+
+    return res.json({
       success: true,
-      data: topManagers.slice(0, 5) // Return top 5
+      data: topManagers
     });
+
   } catch (error) {
-    console.error('Get top managers error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Failed to fetch top managers' 
+    console.error('❌ Get top managers error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch top managers',
+      error: error.message
     });
   }
 };
 
-/**
- * Get revenue trend data
- */
+// ============================================
+// FIX 4: Get Revenue Trend
+// ============================================
 const getRevenueTrend = async (req, res) => {
   try {
     const { range = 'week' } = req.query;
-    const startDate = getDateRange(range);
     
-    // Get daily revenue for the last 7 days
+    console.log('📈 Fetching revenue trend for range:', range);
+
+    // Calculate date range
+    const now = new Date();
+    let startDate = new Date();
+    let groupBy = 'day';
+    
+    switch (range) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        groupBy = 'hour';
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        groupBy = 'day';
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        groupBy = 'day';
+        break;
+      case 'quarter':
+        startDate.setMonth(now.getMonth() - 3);
+        groupBy = 'week';
+        break;
+      default:
+        startDate.setDate(now.getDate() - 7);
+        groupBy = 'day';
+    }
+
+    // Get quotes and orders within range
+    const [quotes, orders] = await Promise.all([
+      prisma.quote.findMany({
+        where: {
+          createdAt: {
+            gte: startDate
+          },
+          status: 'APPROVED'
+        },
+        select: {
+          createdAt: true,
+          totalAmount: true
+        }
+      }),
+      prisma.order.findMany({
+        where: {
+          createdAt: {
+            gte: startDate
+          }
+        },
+        select: {
+          createdAt: true,
+          totalAmount: true
+        }
+      })
+    ]);
+
+    // Group data by day for the past week
     const trendData = [];
+    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    
     for (let i = 6; i >= 0; i--) {
       const date = new Date();
       date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
+      date.setHours(0, 0, 0, 0);
       
-      // Get orders for this day
-      const dayStart = new Date(date);
-      dayStart.setHours(0, 0, 0, 0);
-      const dayEnd = new Date(date);
-      dayEnd.setHours(23, 59, 59, 999);
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
       
-      const dayOrders = await prisma.order.aggregate({
-        where: {
-          createdAt: { gte: dayStart, lte: dayEnd },
-          status: 'DELIVERED'
-        },
-        _sum: { totalAmount: true },
-        _count: { id: true }
+      const dayQuotes = quotes.filter(q => {
+        const qDate = new Date(q.createdAt);
+        return qDate >= date && qDate < nextDate;
       });
       
-      // Get quotes for this day
-      const dayQuotes = await prisma.quote.aggregate({
-        where: {
-          createdAt: { gte: dayStart, lte: dayEnd }
-        },
-        _sum: { totalAmount: true }
+      const dayOrders = orders.filter(o => {
+        const oDate = new Date(o.createdAt);
+        return oDate >= date && oDate < nextDate;
       });
+      
+      const quoteRevenue = dayQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
+      const orderRevenue = dayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
       
       trendData.push({
-        date: dateStr,
-        label: getDayLabel(date),
-        orderRevenue: dayOrders._sum.totalAmount || 0,
-        orderCount: dayOrders._count.id || 0,
-        quoteRevenue: dayQuotes._sum.totalAmount || 0,
-        type: 'daily'
+        label: daysOfWeek[date.getDay()],
+        date: date.toISOString(),
+        quoteRevenue,
+        orderRevenue,
+        type: 'revenue'
       });
     }
-    
-    res.json({
+
+    console.log('✅ Revenue trend calculated:', trendData.length, 'data points');
+
+    return res.json({
       success: true,
       data: trendData
     });
+
   } catch (error) {
-    console.error('Get revenue trend error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Failed to fetch revenue trend' 
+    console.error('❌ Get revenue trend error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch revenue trend',
+      error: error.message
     });
   }
 };
 
-/**
- * Get recent activity logs
- * Note: You'll need to create an Activity model to log system activities
- */
+// ============================================
+// FIX 5: Get Recent Activity
+// ============================================
 const getRecentActivity = async (req, res) => {
   try {
-    // For now, we'll return placeholder data
-    // You should create an Activity model to track these events
-    const placeholderActivities = [
-      {
-        type: 'quote',
-        description: 'New quote created by John Doe',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30)
-      },
-      {
-        type: 'order',
-        description: 'Order #12345 delivered successfully',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2)
-      },
-      {
-        type: 'user',
-        description: 'New manager account created',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5)
-      },
-      {
-        type: 'quote',
-        description: 'Quote approved by client',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 8)
-      },
-      {
-        type: 'order',
-        description: 'Payment received for Order #12344',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60 * 12)
-      }
-    ];
-    
-    res.json({
-      success: true,
-      data: placeholderActivities
-    });
-    
-    
-    
+    console.log('📋 Fetching recent activity');
+
+    // ✅ FIXED: Only call res.json() once
     const activities = await prisma.activity.findMany({
       take: 10,
-      orderBy: { timestamp: 'desc' },
-      select: {
-        type: true,
-        description: true,
-        timestamp: true
+      orderBy: {
+        timestamp: 'desc'
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true
+          }
+        }
       }
     });
-    
-    res.json({
+
+    console.log('✅ Found', activities.length, 'recent activities');
+
+    // Return response only once
+    return res.json({
       success: true,
       data: activities
     });
-    
+
   } catch (error) {
-    console.error('Get recent activity error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || 'Failed to fetch recent activity' 
+    console.error('❌ Get recent activity error:', error);
+    
+    // ✅ FIXED: Check if headers already sent before responding
+    if (res.headersSent) {
+      console.error('⚠️ Headers already sent, cannot send error response');
+      return;
+    }
+    
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent activity',
+      error: error.message
     });
   }
 };
@@ -2389,5 +2485,5 @@ module.exports = {
   getTopManagers,
   getRevenueTrend,
   getRecentActivity,
-  exportData,
+  exportData
 };
