@@ -2242,6 +2242,110 @@ const exportData = async (req, res) => {
   }
 };
 
+// ============================================
+// COMPLETE getRevenueTrend Function
+// ============================================
+
+const getRevenueTrend = async (req, res) => {
+  try {
+    const { range = 'week' } = req.query;
+    
+    console.log('📈 Fetching revenue trend for range:', range);
+
+    const now = new Date();
+    let startDate = new Date();
+    
+    switch (range) {
+      case 'day':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'week':
+        startDate.setDate(now.getDate() - 7);
+        break;
+      case 'month':
+        startDate.setMonth(now.getMonth() - 1);
+        break;
+      case 'quarter':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      default:
+        startDate.setDate(now.getDate() - 7);
+    }
+
+    // Get quotes and orders within range
+    const [quotes, orders] = await Promise.all([
+      prisma.quote.findMany({
+        where: {
+          createdAt: { gte: startDate },
+          status: 'APPROVED'
+        },
+        select: {
+          createdAt: true,
+          totalAmount: true
+        }
+      }),
+      prisma.order.findMany({
+        where: {
+          createdAt: { gte: startDate }
+        },
+        select: {
+          createdAt: true,
+          totalAmount: true
+        }
+      })
+    ]);
+
+    // Group data by day for the past week
+    const trendData = [];
+    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+      
+      const nextDate = new Date(date);
+      nextDate.setDate(nextDate.getDate() + 1);
+      
+      const dayQuotes = quotes.filter(q => {
+        const qDate = new Date(q.createdAt);
+        return qDate >= date && qDate < nextDate;
+      });
+      
+      const dayOrders = orders.filter(o => {
+        const oDate = new Date(o.createdAt);
+        return oDate >= date && oDate < nextDate;
+      });
+      
+      const quoteRevenue = dayQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
+      const orderRevenue = dayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      
+      trendData.push({
+        label: daysOfWeek[date.getDay()],
+        date: date.toISOString(),
+        quoteRevenue,
+        orderRevenue,
+        type: 'revenue'
+      });
+    }
+
+    console.log('✅ Revenue trend calculated:', trendData.length, 'data points');
+
+    return res.json({
+      success: true,
+      data: trendData
+    });
+
+  } catch (error) {
+    console.error('❌ Get revenue trend error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch revenue trend',
+      error: error.message
+    });
+  }
+};
+
 // Helper function to get date range
 function getDateRange(range) {
   const now = new Date();
@@ -2303,6 +2407,14 @@ function convertToCSV(data) {
   
   return csvRows.join('\n');
 }
+
+// Verify all functions exist
+console.log('getDashboardStats:', typeof getDashboardStats);
+console.log('getRecentQuotes:', typeof getRecentQuotes);
+console.log('getTopManagers:', typeof getTopManagers);
+console.log('getRevenueTrend:', typeof getRevenueTrend);
+console.log('getRecentActivity:', typeof getRecentActivity);
+
 module.exports = {
   generateSystemReport,
   exportReportToCSV,
