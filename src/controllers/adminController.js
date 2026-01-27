@@ -1890,7 +1890,6 @@ const getDashboardStats = async (req, res) => {
   try {
     const { range = 'week' } = req.query;
     
-    // Calculate date range
     const now = new Date();
     let startDate = new Date();
     
@@ -1913,89 +1912,52 @@ const getDashboardStats = async (req, res) => {
 
     console.log('📊 Fetching dashboard stats for range:', range, 'from', startDate.toISOString());
 
-    // Execute all queries in parallel
+    // ✅ FIXED: Query User model with role='CLIENT', not Client model
     const [
-      orderRevenue,
-      quoteRevenue,
       totalQuotesCount,
       activeQuotesCount,
       completedQuotesCount,
       totalClientsCount,
       newClientsCount
     ] = await Promise.all([
-      // ✅ FIXED: Use _sum instead of select for aggregate
-      prisma.order.aggregate({
-        where: {
-          createdAt: {
-            gte: startDate
-          }
-        },
-        _sum: {
-          totalAmount: true
-        }
+      prisma.quote.count({
+        where: { createdAt: { gte: startDate } }
       }),
-      
-      // ✅ FIXED: Use _sum for quote aggregate
-      prisma.quote.aggregate({
-        where: {
-          createdAt: {
-            gte: startDate
-          },
-          status: 'APPROVED'
-        },
-        _sum: {
-          totalAmount: true
-        }
-      }),
-      
-      // Total quotes
       prisma.quote.count({
         where: {
-          createdAt: {
-            gte: startDate
-          }
+          status: { in: ['PENDING_PRICING', 'IN_PRICING', 'AWAITING_CLIENT_APPROVAL'] }
         }
       }),
-      
-      // Active quotes (being priced or awaiting approval)
       prisma.quote.count({
         where: {
-          status: {
-            in: ['PENDING_PRICING', 'IN_PRICING', 'AWAITING_CLIENT_APPROVAL']
-          }
+          status: { in: ['APPROVED', 'CONVERTED_TO_ORDER'] },
+          createdAt: { gte: startDate }
         }
       }),
-      
-      // Completed quotes
-      prisma.quote.count({
-        where: {
-          status: {
-            in: ['APPROVED', 'CONVERTED_TO_ORDER']
-          },
-          createdAt: {
-            gte: startDate
-          }
-        }
+      // ✅ CRITICAL FIX: Use User model with role CLIENT, not Client model
+      prisma.user.count({
+        where: { role: 'CLIENT' }
       }),
-      
-      // Total clients
-      prisma.client.count(),
-      
-      // New clients in range
-      prisma.client.count({
-        where: {
-          createdAt: {
-            gte: startDate
-          }
+      prisma.user.count({
+        where: { 
+          role: 'CLIENT',
+          createdAt: { gte: startDate } 
         }
       })
     ]);
 
-    // ✅ FIXED: Safely access _sum results
-    const totalRevenue = (orderRevenue._sum.totalAmount || 0) + (quoteRevenue._sum.totalAmount || 0);
-    const averageQuoteValue = totalQuotesCount > 0 
-      ? (quoteRevenue._sum.totalAmount || 0) / totalQuotesCount 
-      : 0;
+    // ✅ Calculate revenue safely
+    const approvedQuotes = await prisma.quote.findMany({
+      where: {
+        createdAt: { gte: startDate },
+        status: 'APPROVED',
+        totalAmount: { not: null }
+      },
+      select: { totalAmount: true }
+    });
+
+    const totalRevenue = approvedQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
+    const averageQuoteValue = totalQuotesCount > 0 ? totalRevenue / totalQuotesCount : 0;
     const conversionRate = totalQuotesCount > 0 
       ? ((completedQuotesCount / totalQuotesCount) * 100).toFixed(1)
       : 0;
@@ -2027,7 +1989,6 @@ const getDashboardStats = async (req, res) => {
     });
   }
 };
-
 // ============================================
 // FIX 2: Get Recent Quotes
 // ============================================
@@ -2097,11 +2058,22 @@ const getTopManagers = async (req, res) => {
   try {
     console.log('👥 Fetching top performing managers');
 
-    // Get all managers with their quote data
-    const managers = await prisma.manager.findMany({
-      include: {
-        quotes: {
+    // ✅ CRITICAL FIX: Query User model with role MANAGER, not Manager model
+    const managers = await prisma.user.findMany({
+      where: { role: 'MANAGER' },
+      select: {
+        id: true,
+        name: true,
+        email: true
+      }
+    });
+
+    // Get quotes for each manager
+    const managersWithMetrics = await Promise.all(
+      managers.map(async (manager) => {
+        const quotes = await prisma.quote.findMany({
           where: {
+            managerId: manager.id,
             status: {
               in: ['APPROVED', 'CONVERTED_TO_ORDER', 'AWAITING_CLIENT_APPROVAL']
             }
@@ -2111,33 +2083,30 @@ const getTopManagers = async (req, res) => {
             totalAmount: true,
             status: true
           }
-        }
-      }
-    });
+        });
 
-    // Calculate performance metrics for each manager
-    const managersWithMetrics = managers.map(manager => {
-      const totalQuotes = manager.quotes.length;
-      const revenueGenerated = manager.quotes.reduce((sum, quote) => 
-        sum + (quote.totalAmount || 0), 0
-      );
-      const approvedQuotes = manager.quotes.filter(q => 
-        q.status === 'APPROVED' || q.status === 'CONVERTED_TO_ORDER'
-      ).length;
-      const conversionRate = totalQuotes > 0 
-        ? Math.round((approvedQuotes / totalQuotes) * 100)
-        : 0;
+        const totalQuotes = quotes.length;
+        const revenueGenerated = quotes.reduce((sum, quote) => 
+          sum + (quote.totalAmount || 0), 0
+        );
+        const approvedQuotes = quotes.filter(q => 
+          q.status === 'APPROVED' || q.status === 'CONVERTED_TO_ORDER'
+        ).length;
+        const conversionRate = totalQuotes > 0 
+          ? Math.round((approvedQuotes / totalQuotes) * 100)
+          : 0;
 
-      return {
-        id: manager.id,
-        name: manager.name,
-        email: manager.email,
-        revenueGenerated,
-        quotesCompleted: approvedQuotes,
-        totalQuotes,
-        conversionRate
-      };
-    });
+        return {
+          id: manager.id,
+          name: manager.name,
+          email: manager.email,
+          revenueGenerated,
+          quotesCompleted: approvedQuotes,
+          totalQuotes,
+          conversionRate
+        };
+      })
+    );
 
     // Sort by revenue and take top 5
     const topManagers = managersWithMetrics
@@ -2160,121 +2129,6 @@ const getTopManagers = async (req, res) => {
     });
   }
 };
-
-// ============================================
-// FIX 4: Get Revenue Trend
-// ============================================
-const getRevenueTrend = async (req, res) => {
-  try {
-    const { range = 'week' } = req.query;
-    
-    console.log('📈 Fetching revenue trend for range:', range);
-
-    // Calculate date range
-    const now = new Date();
-    let startDate = new Date();
-    let groupBy = 'day';
-    
-    switch (range) {
-      case 'day':
-        startDate.setHours(0, 0, 0, 0);
-        groupBy = 'hour';
-        break;
-      case 'week':
-        startDate.setDate(now.getDate() - 7);
-        groupBy = 'day';
-        break;
-      case 'month':
-        startDate.setMonth(now.getMonth() - 1);
-        groupBy = 'day';
-        break;
-      case 'quarter':
-        startDate.setMonth(now.getMonth() - 3);
-        groupBy = 'week';
-        break;
-      default:
-        startDate.setDate(now.getDate() - 7);
-        groupBy = 'day';
-    }
-
-    // Get quotes and orders within range
-    const [quotes, orders] = await Promise.all([
-      prisma.quote.findMany({
-        where: {
-          createdAt: {
-            gte: startDate
-          },
-          status: 'APPROVED'
-        },
-        select: {
-          createdAt: true,
-          totalAmount: true
-        }
-      }),
-      prisma.order.findMany({
-        where: {
-          createdAt: {
-            gte: startDate
-          }
-        },
-        select: {
-          createdAt: true,
-          totalAmount: true
-        }
-      })
-    ]);
-
-    // Group data by day for the past week
-    const trendData = [];
-    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      date.setHours(0, 0, 0, 0);
-      
-      const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
-      
-      const dayQuotes = quotes.filter(q => {
-        const qDate = new Date(q.createdAt);
-        return qDate >= date && qDate < nextDate;
-      });
-      
-      const dayOrders = orders.filter(o => {
-        const oDate = new Date(o.createdAt);
-        return oDate >= date && oDate < nextDate;
-      });
-      
-      const quoteRevenue = dayQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
-      const orderRevenue = dayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-      
-      trendData.push({
-        label: daysOfWeek[date.getDay()],
-        date: date.toISOString(),
-        quoteRevenue,
-        orderRevenue,
-        type: 'revenue'
-      });
-    }
-
-    console.log('✅ Revenue trend calculated:', trendData.length, 'data points');
-
-    return res.json({
-      success: true,
-      data: trendData
-    });
-
-  } catch (error) {
-    console.error('❌ Get revenue trend error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch revenue trend',
-      error: error.message
-    });
-  }
-};
-
 // ============================================
 // FIX 5: Get Recent Activity
 // ============================================
