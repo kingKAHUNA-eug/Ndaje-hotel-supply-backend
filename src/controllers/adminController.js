@@ -1883,9 +1883,6 @@ const getOrderHistory = async (req, res) => {
     });
   }
 };
-// ============================================
-// FIX 1: Get Dashboard Stats
-// ============================================
 const getDashboardStats = async (req, res) => {
   try {
     const { range = 'week' } = req.query;
@@ -1912,7 +1909,7 @@ const getDashboardStats = async (req, res) => {
 
     console.log('📊 Fetching dashboard stats for range:', range, 'from', startDate.toISOString());
 
-    // ✅ FIXED: Query User model with role='CLIENT', not Client model
+    // Query User model with role='CLIENT', not Client model
     const [
       totalQuotesCount,
       activeQuotesCount,
@@ -1934,7 +1931,6 @@ const getDashboardStats = async (req, res) => {
           createdAt: { gte: startDate }
         }
       }),
-      // ✅ CRITICAL FIX: Use User model with role CLIENT, not Client model
       prisma.user.count({
         where: { role: 'CLIENT' }
       }),
@@ -1946,12 +1942,15 @@ const getDashboardStats = async (req, res) => {
       })
     ]);
 
-    // ✅ Calculate revenue safely
+    // ✅ CRITICAL FIX: The error showed `not: Float` which is wrong!
+    // It should be `not: null` to filter out null values
     const approvedQuotes = await prisma.quote.findMany({
       where: {
         createdAt: { gte: startDate },
         status: 'APPROVED',
-        totalAmount: { not: null }
+        NOT: {
+          totalAmount: null  // ✅ FIXED: Use NOT: { field: null } syntax
+        }
       },
       select: { totalAmount: true }
     });
@@ -2407,13 +2406,6 @@ function convertToCSV(data) {
   
   return csvRows.join('\n');
 }
-
-// Verify all functions exist
-console.log('getDashboardStats:', typeof getDashboardStats);
-console.log('getRecentQuotes:', typeof getRecentQuotes);
-console.log('getTopManagers:', typeof getTopManagers);
-console.log('getRevenueTrend:', typeof getRevenueTrend);
-console.log('getRecentActivity:', typeof getRecentActivity);
 
 module.exports = {
   generateSystemReport,
