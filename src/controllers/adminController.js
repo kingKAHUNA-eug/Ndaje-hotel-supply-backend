@@ -1942,18 +1942,17 @@ const getDashboardStats = async (req, res) => {
       })
     ]);
 
-    // ✅ CRITICAL FIX: The error showed `not: Float` which is wrong!
-    // It should be `not: null` to filter out null values
-    const approvedQuotes = await prisma.quote.findMany({
-      where: {
-        createdAt: { gte: startDate },
-        status: 'APPROVED',
-        NOT: {
-          totalAmount: null  // ✅ FIXED: Use NOT: { field: null } syntax
-        }
-      },
-      select: { totalAmount: true }
-    });
+   // ✅ CORRECT - Filter in JavaScript instead
+const allApprovedQuotes = await prisma.quote.findMany({
+  where: {
+    createdAt: { gte: startDate },
+    status: 'APPROVED'
+  },
+  select: { totalAmount: true }
+});
+
+// Filter out null values in JavaScript
+const approvedQuotes = allApprovedQuotes.filter(q => q.totalAmount !== null && q.totalAmount !== undefined);
 
     const totalRevenue = approvedQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
     const averageQuoteValue = totalQuotesCount > 0 ? totalRevenue / totalQuotesCount : 0;
