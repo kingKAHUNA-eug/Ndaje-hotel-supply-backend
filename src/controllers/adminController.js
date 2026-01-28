@@ -2270,7 +2270,7 @@ const getRevenueTrend = async (req, res) => {
         startDate.setDate(now.getDate() - 7);
     }
 
-    // Get quotes and orders within range
+    // ✅ FIX: Use 'total' for Order, 'totalAmount' for Quote
     const [quotes, orders] = await Promise.all([
       prisma.quote.findMany({
         where: {
@@ -2288,7 +2288,7 @@ const getRevenueTrend = async (req, res) => {
         },
         select: {
           createdAt: true,
-          totalAmount: true
+          total: true  // ✅ FIXED
         }
       })
     ]);
@@ -2316,7 +2316,7 @@ const getRevenueTrend = async (req, res) => {
       });
       
       const quoteRevenue = dayQuotes.reduce((sum, q) => sum + (q.totalAmount || 0), 0);
-      const orderRevenue = dayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+      const orderRevenue = dayOrders.reduce((sum, o) => sum + (o.total || 0), 0);  // ✅ FIXED
       
       trendData.push({
         label: daysOfWeek[date.getDay()],
@@ -2343,7 +2343,6 @@ const getRevenueTrend = async (req, res) => {
     });
   }
 };
-
 // Helper function to get date range
 function getDateRange(range) {
   const now = new Date();
