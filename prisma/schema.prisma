@@ -16,6 +16,18 @@ enum DeliveryStatus {
   MANAGER_CONFIRMED
 }
 
+enum ProductWishStatus {
+  PENDING           // Client submitted, waiting for admin review
+  UNDER_REVIEW      // Admin is reviewing
+  APPROVED          // Admin confirmed product can be sourced
+  REJECTED          // Admin rejected the request
+  IN_DISCUSSION     // Client and admin discussing via WhatsApp
+  PRODUCT_CREATED   // Admin created the product (booked)
+  QUOTE_SUBMITTED   // Client submitted quote for this product
+  COMPLETED         // Entire process completed
+  CANCELLED         // Client cancelled the request
+}
+
 enum Role {
   CLIENT
   MANAGER
@@ -71,6 +83,7 @@ model User {
   emailVerified Boolean        @default(false)
   notifications Notification[]
   activities    Activity[]
+  productWishes    ProductWish[]
 
   addresses        Address[]
   orders           Order[]    @relation("ClientOrders")
@@ -116,11 +129,50 @@ model Product {
   image       String?
   active      Boolean
 
+  bookedForWish    ProductWish?
+  isBookedProduct  Boolean @default(false)
+  bookedForClientId String?
+
   orderItems OrderItem[]
   quoteItems QuoteItem[]
 
   @@map("Product")
 }
+
+model ProductWish {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  clientId        String   @db.ObjectId
+  client          User     @relation(fields: [clientId], references: [id])
+  
+  // Product request details
+  imageUrl        String?
+  description     String?
+  estimatedPrice  Float?
+  quantity        Int      @default(1)
+  
+  // Status tracking
+  status          ProductWishStatus @default(PENDING)
+  adminResponse   String?
+  adminNotes      String?
+  
+  // If approved and product created
+  productId       String?  @unique @db.ObjectId
+  product         Product? @relation(fields: [productId], references: [id])
+  
+  // WhatsApp conversation
+  whatsappChatUrl   String?
+  conversationNotes String?
+  
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  reviewedAt      DateTime?
+  approvedAt      DateTime?
+  
+  @@index([clientId])
+  @@index([status])
+}
+
 
 model Order {
   id        String      @id @default(auto()) @map("_id") @db.ObjectId

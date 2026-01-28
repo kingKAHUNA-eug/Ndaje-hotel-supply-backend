@@ -32,7 +32,7 @@ const managerRoutes = require('./routes/manager');
 const errorHandler = require('./middlewares/errorHandler');
 const notificationRoutes = require('./routes/notification');
 const driverRoutes = require('./routes/driver');
-
+const productWishRoutes = require('./routes/productWishRoutes');
 
 const app = express();
 setupCronJobs();
@@ -133,6 +133,8 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/driver', driverRoutes);
 // ADMIN ROUTES — LOCKED TO role:ADMIN ONLY
 app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
+
+app.use('/api/product-wishes', productWishRoutes);
 
 app.use(errorHandler);
 
