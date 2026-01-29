@@ -35,6 +35,9 @@ const driverRoutes = require('./routes/driver');
 const productWishRoutes = require('./routes/productWishRoutes');
 
 const corsMiddleware = require('./middlewares/cors');
+app.use(corsMiddleware);
+// Handle preflight requests
+app.options('*', corsMiddleware);
 
 const app = express();
 setupCronJobs();
@@ -140,8 +143,6 @@ app.use('/api/product-wishes', productWishRoutes);
 
 app.use(errorHandler);
 
-app.use(corsMiddleware);
-app.options('*', corsMiddleware);
 // 404
 app.use((req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
