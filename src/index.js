@@ -34,6 +34,8 @@ const notificationRoutes = require('./routes/notification');
 const driverRoutes = require('./routes/driver');
 const productWishRoutes = require('./routes/productWishRoutes');
 
+const corsMiddleware = require('./middlewares/cors');
+
 const app = express();
 setupCronJobs();
 // FIXED CORS — RENDER.COM PROOF
@@ -137,6 +139,8 @@ app.use('/api/admin', authenticateToken, requireAdmin, adminRoutes);
 app.use('/api/product-wishes', productWishRoutes);
 
 app.use(errorHandler);
+
+app.use(corsMiddleware);
 
 // 404
 app.use((req, res) => {
