@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const productWishController = require('../controllers/productWishController');
-const { authenticateToken, requireRole } = require('../middleware/auth');
+const { authenticateToken, requireClient, requireAdmin, authorize } = require('../middlewares/auth');
 
 // Configure multer for image uploads
 const upload = multer({
@@ -23,7 +23,7 @@ const upload = multer({
 router.post(
   '/submit',
   authenticateToken,
-  requireRole(['CLIENT']),
+  authorize('CLIENT'),
   upload.single('image'),
   productWishController.submitProductWish
 );
@@ -31,21 +31,21 @@ router.post(
 router.get(
   '/my-wishes',
   authenticateToken,
-  requireRole(['CLIENT']),
+  authorize('CLIENT'),
   productWishController.getMyProductWishes
 );
 
 router.get(
   '/my-booked-products',
   authenticateToken,
-  requireRole(['CLIENT']),
+  authorize('CLIENT'),
   productWishController.getMyBookedProducts
 );
 
 router.post(
   '/:wishId/start-discussion',
   authenticateToken,
-  requireRole(['CLIENT']),
+  authorize('CLIENT'),
   productWishController.startWhatsAppDiscussion
 );
 
@@ -53,28 +53,28 @@ router.post(
 router.get(
   '/all',
   authenticateToken,
-  requireRole(['ADMIN']),
+  requireAdmin,
   productWishController.getAllProductWishes
 );
 
 router.post(
   '/:wishId/approve',
   authenticateToken,
-  requireRole(['ADMIN']),
+  requireAdmin,
   productWishController.approveProductWish
 );
 
 router.post(
   '/:wishId/reject',
   authenticateToken,
-  requireRole(['ADMIN']),
+  requireAdmin,
   productWishController.rejectProductWish
 );
 
 router.post(
   '/:wishId/create-product',
   authenticateToken,
-  requireRole(['ADMIN']),
+  requireAdmin,
   productWishController.createBookedProduct
 );
 
