@@ -44,7 +44,7 @@ const app = express();
 // ────── CORS Middleware (MUST BE FIRST) ──────
 const corsMiddleware = require('./middlewares/cors');
 app.use(corsMiddleware);
-app.options('*', corsMiddleware);
+
 
 // ────── Security & Logging ──────
 app.use(helmet());
