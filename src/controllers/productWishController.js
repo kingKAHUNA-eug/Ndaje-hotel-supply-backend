@@ -6,7 +6,7 @@ const cloudinary = require('cloudinary').v2;
  */
 const submitProductWish = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const clientId = req.user.userId; // Using userId from auth middleware
     const { description, estimatedPrice, quantity } = req.body;
 
     if (!req.file) {
@@ -82,7 +82,7 @@ const submitProductWish = async (req, res) => {
  */
 const getMyProductWishes = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const clientId = req.user.userId;
     const { status } = req.query;
 
     const whereClause = { clientId };
@@ -123,7 +123,8 @@ const getMyProductWishes = async (req, res) => {
     console.error('❌ Get my product wishes error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch product wishes'
+      message: 'Failed to fetch product wishes',
+      error: error.message
     });
   }
 };
@@ -146,8 +147,7 @@ const getAllProductWishes = async (req, res) => {
             id: true,
             name: true,
             email: true,
-            phone: true,
-            hotelName: true
+            phone: true
           }
         },
         product: {
@@ -182,7 +182,8 @@ const getAllProductWishes = async (req, res) => {
     console.error('❌ Get all product wishes error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch product wishes'
+      message: 'Failed to fetch product wishes',
+      error: error.message
     });
   }
 };
@@ -208,12 +209,14 @@ const approveProductWish = async (req, res) => {
     }
 
     // Generate WhatsApp chat URL
-    const clientPhone = wish.client.phone.replace(/\D/g, ''); // Remove non-digits
-    const adminPhone = whatsappNumber || process.env.ADMIN_WHATSAPP || '';
-    const message = encodeURIComponent(
-      `Hello! Regarding your product request #${wishId.slice(-8)}. We can source this product for you. Let's discuss the details.`
-    );
-    const whatsappUrl = `https://wa.me/${clientPhone}?text=${message}`;
+    let whatsappUrl = null;
+    if (wish.client.phone) {
+      const clientPhone = wish.client.phone.replace(/\D/g, ''); // Remove non-digits
+      const message = encodeURIComponent(
+        `Hello! Regarding your product request #${wishId.slice(-8)}. We can source this product for you. Let's discuss the details.`
+      );
+      whatsappUrl = `https://wa.me/${clientPhone}?text=${message}`;
+    }
 
     const updatedWish = await prisma.productWish.update({
       where: { id: wishId },
@@ -252,7 +255,8 @@ const approveProductWish = async (req, res) => {
     console.error('❌ Approve product wish error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to approve product wish'
+      message: 'Failed to approve product wish',
+      error: error.message
     });
   }
 };
@@ -287,7 +291,8 @@ const rejectProductWish = async (req, res) => {
     console.error('❌ Reject product wish error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to reject product wish'
+      message: 'Failed to reject product wish',
+      error: error.message
     });
   }
 };
@@ -379,7 +384,7 @@ const createBookedProduct = async (req, res) => {
  */
 const getMyBookedProducts = async (req, res) => {
   try {
-    const clientId = req.user.id;
+    const clientId = req.user.userId;
 
     const bookedProducts = await prisma.product.findMany({
       where: {
@@ -409,7 +414,8 @@ const getMyBookedProducts = async (req, res) => {
     console.error('❌ Get booked products error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch booked products'
+      message: 'Failed to fetch booked products',
+      error: error.message
     });
   }
 };
@@ -438,7 +444,8 @@ const startWhatsAppDiscussion = async (req, res) => {
     console.error('❌ Start WhatsApp discussion error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to start discussion'
+      message: 'Failed to start discussion',
+      error: error.message
     });
   }
 };
