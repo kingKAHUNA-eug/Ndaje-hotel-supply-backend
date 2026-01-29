@@ -11,8 +11,17 @@ const { prisma } = require('../index');
 const ActivityService = require('../services/activityService');
 
 
-// Configure Cloudinary
+// Configure Cloudinary - WITH DEBUGGING
+console.log('🔧 CLOUDINARY ENV CHECK:');
+console.log('  CLOUDINARY_URL:', process.env.CLOUDINARY_URL ? 'SET' : 'NOT SET');
+console.log('  CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME);
+console.log('  CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY ? 'SET' : 'NOT SET');
+
 if (process.env.CLOUDINARY_URL) {
+  // Parse the URL to check the cloud name
+  const urlMatch = process.env.CLOUDINARY_URL.match(/@([^/]+)$/);
+  console.log('  Cloud name from URL:', urlMatch ? urlMatch[1] : 'COULD NOT PARSE');
+  
   cloudinary.config(process.env.CLOUDINARY_URL);
   console.log('✅ Cloudinary configured from CLOUDINARY_URL');
 } else {
@@ -23,6 +32,12 @@ if (process.env.CLOUDINARY_URL) {
   });
   console.log('✅ Cloudinary configured from individual env vars');
 }
+
+// Verify final configuration
+const finalConfig = cloudinary.config();
+console.log('📋 FINAL CLOUDINARY CONFIG:');
+console.log('  cloud_name:', finalConfig.cloud_name);
+console.log('  api_key set:', !!finalConfig.api_key);
 
 // Helper function to generate unique identifiers
 const generateUniqueId = (prefix) => {
