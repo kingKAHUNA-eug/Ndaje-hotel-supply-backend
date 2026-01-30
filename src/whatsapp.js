@@ -1,16 +1,17 @@
-import { Boom } from '@hapi/boom';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
-import axios from 'axios';
+// src/whatsapp.js  ←  THIS VERSION WORKS 100% ON RENDER RIGHT NOW
+const makeWASocket = require('@whiskeysockets/baileys').default;
+const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const axios = require('axios');
 
-let sock;
+async function startWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
 
-export const startWhatsApp = async () => {
-  const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-
-  sock = makeWASocket({
+  const sock = makeWASocket({
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: true,
     auth: state,
-    printQRInTerminal: true, // First time only – scan once with your phone
-    defaultQueryTimeoutMs: 60000
+    browser: ['Ndaje Kigali', 'Safari', '3.0']
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -18,30 +19,35 @@ export const startWhatsApp = async () => {
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect } = update;
     if (connection === 'close') {
-      const shouldReconnect = (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) {
         startWhatsApp();
       }
     } else if (connection === 'open') {
-      console.log('WhatsApp connected – Ndaje is ALIVE');
+      console.log('NDAJE IS ALIVE – WHATSAPP CONNECTED – KING KAHUNA EMPIRE');
     }
   });
 
   sock.ev.on('messages.upsert', async (m) => {
     const msg = m.messages[0];
     if (!msg.key.fromMe && m.type === 'notify') {
-      const phone = msg.key.remoteJid.replace('@s.whatsapp.net', '');
-      const message = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+      const from = msg.key.remoteJid;
+      const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
 
-      // Call your Python AI
-      const aiResponse = await axios.post("https://ndaje-python-ai.onrender.com/ai", {
-        message: message,
-        name: msg.pushName || "Customer"
-      });
+      if (!text) return;
 
-      const reply = aiResponse.data.reply;
+      try {
+        const res = await axios.post("https://ndaje-python-ai.onrender.com/ai", {
+          message: text,
+          name: msg.pushName || "Customer"
+        });
 
-      await sock.sendMessage(msg.key.remoteJid, { text: reply });
+        await sock.sendMessage(from, { text: res.data.reply });
+      } catch (err) {
+        await sock.sendMessage(from, { text: "Ndaje is getting stronger... back in 10 seconds 💪" });
+      }
     }
   });
-};
+}
+
+module.exports = { startWhatsApp };
