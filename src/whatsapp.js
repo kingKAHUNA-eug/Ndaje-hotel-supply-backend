@@ -4,7 +4,12 @@ const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/bai
 const pino = require('pino');
 const axios = require('axios');
 const prisma = require('./config/prisma');
-const qrcode = require('qrcode-terminal');
+let qrcode;
+try {
+  qrcode = require('qrcode-terminal');
+} catch (e) {
+  qrcode = null;
+}
 
 async function startWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
