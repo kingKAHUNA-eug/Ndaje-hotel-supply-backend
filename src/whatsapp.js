@@ -4,13 +4,13 @@ const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/bai
 const pino = require('pino');
 const axios = require('axios');
 const prisma = require('./config/prisma');
+const qrcode = require('qrcode-terminal');
 
 async function startWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
 
   const sock = makeWASocket({
     logger: pino({ level: 'silent' }),
-    printQRInTerminal: true,
     auth: state,
     browser: ['Ndaje Kigali', 'Safari', '3.0']
   });
@@ -18,6 +18,10 @@ async function startWhatsApp() {
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', (update) => {
+    if (update.qr) {
+      qrcode.generate(update.qr, { small: true });
+    }
+
     const { connection, lastDisconnect } = update;
     if (connection === 'close') {
       const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
