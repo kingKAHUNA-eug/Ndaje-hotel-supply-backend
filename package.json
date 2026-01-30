@@ -14,7 +14,8 @@
   "description": "",
   "dependencies": {
     "@prisma/client": "6.19.0",
-    "axios": "^1.12.2",
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "axios": "^1.13.4",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.8.0",
     "cors": "^2.8.5",
@@ -28,6 +29,7 @@
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
+    "pino": "^10.3.0",
     "twilio": "^5.10.3",
     "uuid": "^13.0.0",
     "zod": "^4.1.12"
