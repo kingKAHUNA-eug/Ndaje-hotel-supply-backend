@@ -19,6 +19,9 @@ const { PrismaClient } = require('@prisma/client');
 const { authenticateToken, requireAdmin } = require('./middlewares/auth');
 const { setupCronJobs } = require('./services/cronService');
 
+const { startWhatsApp } = require('./whatsapp');
+startWhatsApp(); 
+
 // ────── Prisma Client ──────
 const prisma = new PrismaClient();
 module.exports.prisma = prisma;
