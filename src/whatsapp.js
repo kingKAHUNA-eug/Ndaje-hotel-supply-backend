@@ -4,6 +4,7 @@ const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/bai
 const pino = require('pino');
 const axios = require('axios');
 const prisma = require('./config/prisma');
+const fs = require('fs');
 let qrcode;
 try {
   qrcode = require('qrcode-terminal');
@@ -11,11 +12,20 @@ try {
   qrcode = null;
 }
 
+// Create file-based logger (to avoid corrupting QR output to stdout)
+const pinoLogger = pino(
+  { level: 'debug' },
+  pino.transport({
+    target: 'pino/file',
+    options: { destination: './whatsapp.log' }
+  })
+);
+
 async function startWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
 
   const sock = makeWASocket({
-    logger: pino({ level: 'silent' }),
+    logger: pinoLogger,
     auth: state,
     browser: ['Ndaje Kigali', 'Safari', '3.0']
   });
@@ -49,8 +59,6 @@ async function startWhatsApp() {
 
       if (!text) return;
 
-      console.log(`📱 Message from ${msg.pushName} (${phone}): ${text}`);
-
       try {
         const res = await axios.post("https://ndaje-python-ai.onrender.com/ai", {
           message: text,
@@ -60,7 +68,7 @@ async function startWhatsApp() {
         aiReply = res.data.reply;
 
         await sock.sendMessage(from, { text: aiReply });
-        console.log(`✅ AI reply sent to ${phone}: ${aiReply}`);
+        pinoLogger.info(`AI reply sent to ${phone}`);
 
         // Extract possible items from message (simple but works 95% of cases)
         try {
@@ -93,12 +101,12 @@ async function startWhatsApp() {
             }
           });
 
-          console.log(`💾 Quote created from WhatsApp - Phone: ${phone} - Items: ${items.length}`);
+          pinoLogger.info(`Quote created - Phone: ${phone}, Items: ${items.length}`);
         } catch (quoteErr) {
-          console.error(`❌ Failed to save quote: ${quoteErr.message}`);
+          pinoLogger.error(`Failed to save quote: ${quoteErr.message}`);
         }
       } catch (err) {
-        console.error(`❌ AI call failed: ${err.message}`);
+        pinoLogger.error(`AI call failed: ${err.message}`);
         await sock.sendMessage(from, { text: "Ndaje is getting stronger... back in 10 seconds 💪" });
       }
 
