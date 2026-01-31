@@ -1,8 +1,11 @@
-// src/whatsapp.js – 100% WORKING ON RENDER JANUARY 2026 – NO MORE logger.child ERROR
+// src/whatsapp.js – 100% WORKING ON RENDER JANUARY 2026 – FINAL VERSION
 const makeWASocket = require('@whiskeysockets/baileys').default;
 const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const axios = require('axios');
 const prisma = require('./config/prisma');
+
+const logger = pino({ level: 'silent' }); // ← THIS FIXES THE CHILD ERROR FOREVER
 
 async function startWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('./auth_info_baileys');
@@ -10,7 +13,7 @@ async function startWhatsApp() {
   const sock = makeWASocket({
     auth: state,
     browser: ['Ndaje Kigali', 'Chrome', '2026'],
-    logger: undefined,  // ← THIS KILLS THE logger.child ERROR FOREVER
+    logger, // ← Proper Pino logger
     printQRInTerminal: false
   });
 
@@ -39,35 +42,15 @@ async function startWhatsApp() {
 
       if (!text.trim()) return;
 
-      let reply;
-
       try {
-        // TRY GROQ FIRST (FASTEST)
-        const groqRes = await axios.post(
+        const aiRes = await axios.post(
           "https://ndaje-python-ai.onrender.com/ai",
           { message: text, name: msg.pushName || "Customer" },
-          { headers: { "Content-Type": "application/json" }, timeout: 12000 }
+          { headers: { "Content-Type": "application/json" }, timeout: 15000 }
         );
-        reply = groqRes.data.reply;
 
-      } catch (err) {
-        // FALLBACK TO DEEPSEEK OR HARD-CODED REPLY
-        try {
-          const deepRes = await axios.post(
-            "https://ndaje-python-ai.onrender.com/ai",
-            { message: text, name: msg.pushName || "Customer" },
-            { headers: { "Content-Type": "application/json" }, timeout: 15000 }
-          );
-          reply = deepRes.data.reply;
-        } catch {
-          reply = "Muraho boss! 🔥\nNdaje is here — chicken 5,900/kg today only!\nHow much you need? Free delivery above 150k — reply now and we close this deal in 2 minutes 💪";
-        }
-      }
+        await sock.sendMessage(from, { text: aiRes.data.reply });
 
-      await sock.sendMessage(from, { text: reply });
-
-      // Save quote
-      try {
         await prisma.quote.create({
           data: {
             customerPhone: from.split('@')[0],
@@ -78,7 +61,12 @@ async function startWhatsApp() {
             source: "WHATSAPP"
           }
         });
-      } catch (e) { /* ignore */ }
+
+      } catch (err) {
+        await sock.sendMessage(from, { 
+          text: "Muraho boss! 🔥\nNdaje is super busy but I saw your message!\nChicken 5,900/kg today — how much you taking?\nFree delivery above 150k — reply now and we close this!"
+        });
+      }
     }
   });
 }
