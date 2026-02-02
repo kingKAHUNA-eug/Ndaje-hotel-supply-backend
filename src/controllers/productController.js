@@ -36,7 +36,6 @@ const productUpdateSchema = z.object({
   active: z.boolean().optional()
 }).partial();
 
-// GET ALL PRODUCTS - Updated to handle images array
 const getProducts = async (req, res) => {
   try {
     const { active = 'true', category } = req.query;
@@ -62,7 +61,7 @@ const getProducts = async (req, res) => {
         category: true,
         reference: true,
         icon: true,
-        images: true, // Now getting images array
+        images: true, // Make sure this is included
         active: true,
         createdAt: true,
         updatedAt: true
@@ -70,15 +69,34 @@ const getProducts = async (req, res) => {
       orderBy: { name: 'asc' }
     });
 
-    // Sanitize null values for frontend
-    const sanitizedProducts = products.map(p => ({
-      ...p,
-      description: p.description || '',
-      category: p.category || '',
-      reference: p.reference || '',
-      images: p.images || [] // Ensure images is always an array
-    }));
+    // CRITICAL FIX: Ensure images is always an array
+    const sanitizedProducts = products.map(p => {
+      // Convert single image to array for backward compatibility
+      let productImages = [];
+      
+      if (p.images && Array.isArray(p.images)) {
+        // Already has images array
+        productImages = p.images.filter(img => img && img.trim() !== '');
+      } else if (p.images && typeof p.images === 'string') {
+        // Single image string
+        productImages = [p.images];
+      } else if (p.image) {
+        // Legacy image field
+        productImages = [p.image];
+      }
+      
+      return {
+        ...p,
+        description: p.description || '',
+        category: p.category || '',
+        reference: p.reference || '',
+        images: productImages, // Always return array
+        image: productImages[0] || '' // Keep for backward compatibility
+      };
+    });
 
+    console.log(`✅ Fetched ${sanitizedProducts.length} products`);
+    
     res.json({
       success: true,
       count: sanitizedProducts.length,
@@ -101,13 +119,25 @@ const getProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
+    // Convert single image to array for backward compatibility
+    let productImages = [];
+    
+    if (product.images && Array.isArray(product.images)) {
+      productImages = product.images.filter(img => img && img.trim() !== '');
+    } else if (product.images && typeof product.images === 'string') {
+      productImages = [product.images];
+    } else if (product.image) {
+      productImages = [product.image];
+    }
+
     // Sanitize null values for frontend
     const sanitizedProduct = {
       ...product,
       description: product.description || '',
       category: product.category || '',
       reference: product.reference || '',
-      images: product.images || [] // Ensure images is always an array
+      images: productImages, // Always array
+      image: productImages[0] || '' // Keep for backward compatibility
     };
 
     res.json({ success: true, data: sanitizedProduct });
@@ -116,7 +146,6 @@ const getProduct = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
 // CREATE PRODUCT - Updated for multiple images
 const createProduct = async (req, res) => {
   try {
