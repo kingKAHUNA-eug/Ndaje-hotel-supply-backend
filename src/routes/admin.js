@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const { authenticateToken, requireAdmin } = require('../middlewares/auth');
+const { authenticateToken, requireAdmin } = require('../middlewares/auth'); // Correct path
 const adminController = require('../controllers/adminController');
 
 // Configure multer for memory storage
@@ -32,12 +32,12 @@ router.post('/create-driver', adminController.createDriver);
 
 router.post('/upload/product-image', upload.single('image'), adminController.uploadProductImage);
 
-// New route for uploading multiple product images
+// FIXED: Use requireAdmin instead of authMiddleware
 router.post('/upload/multiple-product-images', 
-  authMiddleware(['ADMIN']),
   upload.array('images', 6), // Accept up to 6 files
   adminController.uploadMultipleProductImages
 );
+
 // ========== QUOTE MANAGEMENT ROUTES ==========
 router.get('/quotes', adminController.getAllQuotes);
 router.get('/quotes/pending', adminController.getPendingQuotes);
