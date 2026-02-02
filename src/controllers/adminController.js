@@ -122,6 +122,62 @@ const uploadProductImage = async (req, res) => {
     });
   }
 };
+
+const uploadMultipleProductImages = async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'No files uploaded' 
+      });
+    }
+
+    console.log(`📤 Uploading ${req.files.length} images to Cloudinary...`);
+
+    const uploadPromises = req.files.map(file => {
+      return new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'ndaje-products',
+            resource_type: 'auto',
+            allowed_formats: ['jpg', 'png', 'jpeg', 'gif', 'webp']
+          },
+          (error, result) => {
+            if (error) {
+              console.error('❌ Cloudinary error:', error);
+              reject(error);
+            } else {
+              resolve(result);
+            }
+          }
+        );
+        uploadStream.end(file.buffer);
+      });
+    });
+
+    const results = await Promise.all(uploadPromises);
+    
+    const imageData = results.map(result => ({
+      url: result.secure_url,
+      publicId: result.public_id
+    }));
+
+    console.log(`✅ ${results.length} images uploaded successfully`);
+
+    res.json({
+      success: true,
+      message: 'Images uploaded successfully',
+      data: imageData
+    });
+  } catch (error) {
+    console.error('❌ Multiple upload error:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message || 'Failed to upload images' 
+    });
+  }
+};
+
 const cleanupOrphanedQuotes = async (req, res) => {
   try {
     // Only admins can run this
@@ -2430,6 +2486,7 @@ module.exports = {
   createManager,
   createDriver,
   uploadProductImage,
+  uploadMultipleProductImages,
   testCloudinaryConfig,
   resetUserPassword,
   deleteManager,

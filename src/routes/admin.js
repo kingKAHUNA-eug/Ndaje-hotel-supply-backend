@@ -32,6 +32,12 @@ router.post('/create-driver', adminController.createDriver);
 
 router.post('/upload/product-image', upload.single('image'), adminController.uploadProductImage);
 
+// New route for uploading multiple product images
+router.post('/upload/multiple-product-images', 
+  authMiddleware(['ADMIN']),
+  upload.array('images', 6), // Accept up to 6 files
+  adminController.uploadMultipleProductImages
+);
 // ========== QUOTE MANAGEMENT ROUTES ==========
 router.get('/quotes', adminController.getAllQuotes);
 router.get('/quotes/pending', adminController.getPendingQuotes);

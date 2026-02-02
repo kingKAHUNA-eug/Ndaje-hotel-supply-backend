@@ -114,19 +114,26 @@ model Address {
   orders     Order[]
 }
 
+// In schema.prisma - KEEP image field temporarily
 model Product {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  name        String  @unique
-  sku         String  @unique
+  name        String   @unique
+  sku         String   @unique
   reference   String?
   description String?
   category    String?
   price       Float
   icon        String?
+  
+  // Keep image field for backward compatibility
   image       String?
+  
+  // Add new images array field
+  images      String[] @db.String
+  
   active      Boolean
 
   bookedForWish    ProductWish?
@@ -138,7 +145,6 @@ model Product {
 
   @@map("Product")
 }
-
 model ProductWish {
   id              String   @id @default(auto()) @map("_id") @db.ObjectId
   clientId        String   @db.ObjectId

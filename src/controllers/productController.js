@@ -1,12 +1,8 @@
-// controllers/productController.js — FIXED FOR NULL VALUES
+// controllers/productController.js - UPDATED FOR MULTIPLE IMAGES
 const { z } = require('zod');
 const prisma = require('../config/prisma');
 
-// Helper to safely handle null/undefined strings
-const safeString = z.string().optional().nullable().transform(val => val?.trim() || null);
-const safeStringRequired = z.string().min(1).transform(val => val.trim());
-
-// FIXED VALIDATION — handles null values properly
+// Updated validation schema for multiple images
 const productSchema = z.object({
   name: z.string().min(1, 'Product name is required').transform(val => val?.trim() || ''),
   sku: z.string().min(1, 'SKU is required').transform(val => val?.trim() || ''),
@@ -18,14 +14,12 @@ const productSchema = z.object({
   category: z.string().optional().nullable().transform(val => val?.trim() || null),
   reference: z.string().optional().nullable().transform(val => val?.trim() || null),
   icon: z.string().min(1, 'Icon is required').transform(val => val?.trim() || ''),
-  image: z.string().optional().nullable().transform(val => {
-    if (!val || val.trim() === '') return null;
-    return val.trim();
-  }),
+  // CHANGE: Handle array of images
+  images: z.array(z.string().url('Invalid image URL')).max(6, 'Maximum 6 images allowed').optional().default([]),
   active: z.boolean().optional().default(true)
 });
 
-// Schema for partial updates (PUT/PATCH)
+// Schema for partial updates
 const productUpdateSchema = z.object({
   name: z.string().min(1, 'Product name is required').transform(val => val?.trim() || '').optional(),
   sku: z.string().min(1, 'SKU is required').transform(val => val?.trim() || '').optional(),
@@ -37,21 +31,18 @@ const productUpdateSchema = z.object({
   category: z.string().optional().nullable().transform(val => val?.trim() || null),
   reference: z.string().optional().nullable().transform(val => val?.trim() || null),
   icon: z.string().min(1, 'Icon is required').transform(val => val?.trim() || '').optional(),
-  image: z.string().optional().nullable().transform(val => {
-    if (!val || val.trim() === '') return null;
-    return val.trim();
-  }),
+  // CHANGE: Handle array of images
+  images: z.array(z.string().url('Invalid image URL')).max(6, 'Maximum 6 images allowed').optional(),
   active: z.boolean().optional()
 }).partial();
 
-// GET ALL PRODUCTS — Public (clients see this)
+// GET ALL PRODUCTS - Updated to handle images array
 const getProducts = async (req, res) => {
   try {
     const { active = 'true', category } = req.query;
 
     const where = {};
     
-    // Handle active filter
     if (active !== 'all') {
       where.active = active === 'true';
     }
@@ -71,7 +62,7 @@ const getProducts = async (req, res) => {
         category: true,
         reference: true,
         icon: true,
-        image: true,
+        images: true, // Now getting images array
         active: true,
         createdAt: true,
         updatedAt: true
@@ -85,7 +76,7 @@ const getProducts = async (req, res) => {
       description: p.description || '',
       category: p.category || '',
       reference: p.reference || '',
-      image: p.image || ''
+      images: p.images || [] // Ensure images is always an array
     }));
 
     res.json({
@@ -99,7 +90,7 @@ const getProducts = async (req, res) => {
   }
 };
 
-// GET SINGLE PRODUCT - Sanitize nulls for frontend
+// GET SINGLE PRODUCT - Updated
 const getProduct = async (req, res) => {
   try {
     const product = await prisma.product.findUnique({
@@ -116,7 +107,7 @@ const getProduct = async (req, res) => {
       description: product.description || '',
       category: product.category || '',
       reference: product.reference || '',
-      image: product.image || ''
+      images: product.images || [] // Ensure images is always an array
     };
 
     res.json({ success: true, data: sanitizedProduct });
@@ -126,7 +117,7 @@ const getProduct = async (req, res) => {
   }
 };
 
-// CREATE PRODUCT — Admin only
+// CREATE PRODUCT - Updated for multiple images
 const createProduct = async (req, res) => {
   try {
     console.log('📦 Creating product with data:', req.body);
@@ -154,7 +145,7 @@ const createProduct = async (req, res) => {
         category: data.category || null,
         reference: data.reference || null,
         icon: data.icon,
-        image: data.image || null,
+        images: data.images || [], // Store images array
         active: data.active
       }
     });
@@ -189,7 +180,7 @@ const createProduct = async (req, res) => {
   }
 };
 
-// UPDATE PRODUCT - FIXED FOR NULL VALUES
+// UPDATE PRODUCT - Updated for multiple images
 const updateProduct = async (req, res) => {
   try {
     const productId = req.params.id;
@@ -209,16 +200,14 @@ const updateProduct = async (req, res) => {
       });
     }
 
-    // Pre-process the data to handle nulls BEFORE Zod validation
+    // Pre-process the data
     const preprocessedData = {
       ...req.body,
-      // Convert null/undefined to empty strings for optional string fields
       description: req.body.description ?? '',
       category: req.body.category ?? '',
       reference: req.body.reference ?? '',
-      image: req.body.image ?? '',
-      // Ensure price is a number
-      price: req.body.price !== undefined ? Number(req.body.price) : undefined
+      price: req.body.price !== undefined ? Number(req.body.price) : undefined,
+      images: req.body.images || [] // Ensure images is array
     };
     
     console.log('📦 Preprocessed data:', preprocessedData);
@@ -242,7 +231,7 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Build update object - only include defined fields
+    // Build update object
     const updateData = {};
     
     if (data.name !== undefined) updateData.name = data.name;
@@ -252,7 +241,7 @@ const updateProduct = async (req, res) => {
     if (data.category !== undefined) updateData.category = data.category || null;
     if (data.reference !== undefined) updateData.reference = data.reference || null;
     if (data.icon !== undefined) updateData.icon = data.icon;
-    if (data.image !== undefined) updateData.image = data.image || null;
+    if (data.images !== undefined) updateData.images = data.images || []; // Update images array
     if (data.active !== undefined) updateData.active = data.active;
 
     console.log('📦 Final update data:', updateData);
@@ -270,7 +259,7 @@ const updateProduct = async (req, res) => {
       description: product.description || '',
       category: product.category || '',
       reference: product.reference || '',
-      image: product.image || ''
+      images: product.images || []
     };
 
     res.json({ 
