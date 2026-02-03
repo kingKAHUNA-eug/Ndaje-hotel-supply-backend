@@ -35,7 +35,6 @@ const productUpdateSchema = z.object({
   images: z.array(z.string().url('Invalid image URL')).max(6, 'Maximum 6 images allowed').optional(),
   active: z.boolean().optional()
 }).partial();
-
 const getProducts = async (req, res) => {
   try {
     const { active = 'true', category } = req.query;
@@ -50,52 +49,45 @@ const getProducts = async (req, res) => {
       where.category = category;
     }
 
+    // CRITICAL FIX: Don't select images directly since it might not exist yet
     const products = await prisma.product.findMany({
       where,
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        price: true,
-        description: true,
-        category: true,
-        reference: true,
-        icon: true,
-        images: true, // Make sure this is included
-        active: true,
-        createdAt: true,
-        updatedAt: true
-      },
       orderBy: { name: 'asc' }
     });
 
-    // CRITICAL FIX: Ensure images is always an array
+    // Transform products to ensure images array exists
     const sanitizedProducts = products.map(p => {
-      // Convert single image to array for backward compatibility
-      let productImages = [];
+      // Handle images array - create it if it doesn't exist
+      let imagesArray = [];
       
       if (p.images && Array.isArray(p.images)) {
         // Already has images array
-        productImages = p.images.filter(img => img && img.trim() !== '');
-      } else if (p.images && typeof p.images === 'string') {
-        // Single image string
-        productImages = [p.images];
+        imagesArray = p.images;
       } else if (p.image) {
-        // Legacy image field
-        productImages = [p.image];
+        // Has old single image field
+        imagesArray = [p.image];
       }
       
+      // Filter out any null/undefined values
+      imagesArray = imagesArray.filter(img => img && img.trim() !== '');
+      
       return {
-        ...p,
+        id: p.id,
+        name: p.name || '',
+        sku: p.sku || '',
+        price: p.price || 0,
         description: p.description || '',
         category: p.category || '',
         reference: p.reference || '',
-        images: productImages, // Always return array
-        image: productImages[0] || '' // Keep for backward compatibility
+        icon: p.icon || 'cube',
+        images: imagesArray, // Always return an array
+        active: p.active !== false,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt
       };
     });
 
-    console.log(`✅ Fetched ${sanitizedProducts.length} products`);
+    console.log(`✅ Fetched ${sanitizedProducts.length} products with images array support`);
     
     res.json({
       success: true,
@@ -104,54 +96,98 @@ const getProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('Get products error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 
-// GET SINGLE PRODUCT - Updated
+// GET SINGLE PRODUCT
 const getProduct = async (req, res) => {
   try {
+    const { id } = req.params;
+
     const product = await prisma.product.findUnique({
-      where: { id: req.params.id }
+      where: { id }
     });
 
     if (!product) {
-      return res.status(404).json({ success: false, message: 'Product not found' });
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Product not found' 
+      });
     }
 
-    // Convert single image to array for backward compatibility
-    let productImages = [];
+    // Handle images array - create it if it doesn't exist
+    let imagesArray = [];
     
     if (product.images && Array.isArray(product.images)) {
-      productImages = product.images.filter(img => img && img.trim() !== '');
-    } else if (product.images && typeof product.images === 'string') {
-      productImages = [product.images];
+      imagesArray = product.images;
     } else if (product.image) {
-      productImages = [product.image];
+      imagesArray = [product.image];
     }
+    
+    imagesArray = imagesArray.filter(img => img && img.trim() !== '');
 
-    // Sanitize null values for frontend
     const sanitizedProduct = {
-      ...product,
+      id: product.id,
+      name: product.name || '',
+      sku: product.sku || '',
+      price: product.price || 0,
       description: product.description || '',
       category: product.category || '',
       reference: product.reference || '',
-      images: productImages, // Always array
-      image: productImages[0] || '' // Keep for backward compatibility
+      icon: product.icon || 'cube',
+      images: imagesArray,
+      active: product.active !== false,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt
     };
 
-    res.json({ success: true, data: sanitizedProduct });
+    res.json({
+      success: true,
+      data: sanitizedProduct
+    });
   } catch (error) {
     console.error('Get product error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
+
 // CREATE PRODUCT - Updated for multiple images
 const createProduct = async (req, res) => {
   try {
     console.log('📦 Creating product with data:', req.body);
+    console.log('📦 Files received:', req.files?.length || 0);
     
-    const data = productSchema.parse(req.body);
+    // Prepare images from uploaded files or from request body
+    let imageArray = [];
+    
+    // If files were uploaded via multipart
+    if (req.files && req.files.length > 0) {
+      imageArray = req.files.map(file => {
+        const base64 = file.buffer.toString('base64');
+        return `data:${file.mimetype};base64,${base64}`;
+      });
+      console.log('📦 Converted', imageArray.length, 'uploaded files to base64');
+    } else if (req.body.images) {
+      // If images came from request body (array of URLs or base64)
+      imageArray = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
+    }
+    
+    // Merge images into body for validation
+    const bodyData = {
+      ...req.body,
+      images: imageArray
+    };
+    
+    const data = productSchema.parse(bodyData);
 
     // Check if SKU already exists
     const existingSku = await prisma.product.findUnique({
@@ -216,6 +252,7 @@ const updateProduct = async (req, res) => {
     
     console.log('📦 Updating product:', productId);
     console.log('📦 Raw update data:', req.body);
+    console.log('📦 Files received:', req.files?.length || 0);
     
     // Check if product exists
     const existingProduct = await prisma.product.findUnique({
@@ -229,6 +266,24 @@ const updateProduct = async (req, res) => {
       });
     }
 
+    // Prepare images - handle new uploads + existing images
+    let imageArray = [];
+    
+    // If new files were uploaded
+    if (req.files && req.files.length > 0) {
+      imageArray = req.files.map(file => {
+        const base64 = file.buffer.toString('base64');
+        return `data:${file.mimetype};base64,${base64}`;
+      });
+      console.log('📦 Converted', imageArray.length, 'uploaded files to base64');
+    } else if (req.body.images) {
+      // Keep existing images if no new files uploaded
+      imageArray = Array.isArray(req.body.images) ? req.body.images : [req.body.images];
+    } else {
+      // Keep existing images
+      imageArray = existingProduct.images || [];
+    }
+
     // Pre-process the data
     const preprocessedData = {
       ...req.body,
@@ -236,7 +291,7 @@ const updateProduct = async (req, res) => {
       category: req.body.category ?? '',
       reference: req.body.reference ?? '',
       price: req.body.price !== undefined ? Number(req.body.price) : undefined,
-      images: req.body.images || [] // Ensure images is array
+      images: imageArray // Use processed images array
     };
     
     console.log('📦 Preprocessed data:', preprocessedData);
